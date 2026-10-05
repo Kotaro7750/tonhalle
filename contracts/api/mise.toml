@@ -1,0 +1,10 @@
+[tools]
+"npm:@redocly/cli" = "latest"
+
+[tasks."dev"]
+description = "Preview OpenAPI specification"
+run = "redocly preview"
+
+[tasks."lint"]
+description = "Lint OpenAPI specification"
+run = "redocly lint --extends recommended-strict openapi.yaml"
