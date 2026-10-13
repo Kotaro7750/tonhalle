@@ -1,0 +1,522 @@
+openapi: "3.1.0"
+info:
+  title: "Tonhalle API"
+  version: "0.1.0"
+  license:
+    name: "MIT"
+    identifier: "MIT"
+  description: "音楽再生・管理アプリケーション TonhalleのAPI"
+servers:
+  - url: "/api/v0"
+    description: "API Version 0"
+security: []
+tags:
+  - name: "Releases"
+    description: "リリースに関連するAPI"
+  - name: "Tracks"
+    description: "楽曲に関連するAPI"
+paths:
+  "/releases":
+    get:
+      operationId: "listReleases"
+      tags:
+        - "Releases"
+      summary: "リリース一覧の取得"
+      description: |
+        リリース概要をidの昇順でページごとに取得する。
+        各ページはリクエスト時点の一覧を対象とし、一連の取得を通じたスナップショットは保証しない。
+      parameters:
+        - "$ref": "#/components/parameters/Cursor"
+        - "$ref": "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: "リリース一覧の取得に成功した"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ReleasePage"
+              examples:
+                firstPage:
+                  summary: "続きがあるページ"
+                  value:
+                    items:
+                      - id: "release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        title: "Example Album"
+                        releaseDate: "2026-10"
+                        artistCredits:
+                          - artistId: "artist-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                            name: "Example Artist"
+                            joinPhrase: null
+                    nextCursor: "opaque-cursor"
+                lastPage:
+                  summary: "最終ページ"
+                  value:
+                    items:
+                      - id: "release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        title: "Example Album"
+                        releaseDate: "2026-10"
+                        artistCredits:
+                          - artistId: "artist-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                            name: "Example Artist"
+                            joinPhrase: null
+                empty:
+                  summary: "リリースがない場合"
+                  value:
+                    items: []
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "500":
+          "$ref": "#/components/responses/InternalServerError"
+  "/releases/{releaseId}":
+    get:
+      operationId: "getRelease"
+      tags:
+        - "Releases"
+      summary: "リリース詳細の取得"
+      description: "指定したリリースの情報と全収録曲を取得する。"
+      parameters:
+        - "$ref": "#/components/parameters/ReleaseId"
+      responses:
+        "200":
+          description: "リリース詳細の取得に成功した"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Release"
+              examples:
+                release:
+                  summary: "部分日付を持つリリース"
+                  value:
+                    id: "release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    title: "Example Album"
+                    releaseDate: "2026-10"
+                    artistCredits:
+                      - artistId: "artist-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        name: "Example Artist"
+                        joinPhrase: null
+                    tracks:
+                      - id: "track-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                        releaseId: "release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        title: "Example Track"
+                        discNumber: 1
+                        trackNumber: 1
+                        durationMs: 180000
+                        artistCredits:
+                          - artistId: "artist-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                            name: "Example Artist"
+                            joinPhrase: null
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "500":
+          "$ref": "#/components/responses/InternalServerError"
+  "/tracks/{trackId}":
+    get:
+      operationId: "getTrack"
+      tags:
+        - "Tracks"
+      summary: "トラック詳細の取得"
+      description: "指定したトラックの楽曲情報とオリジナル音源の情報を取得する。"
+      parameters:
+        - "$ref": "#/components/parameters/TrackId"
+      responses:
+        "200":
+          description: "トラック詳細の取得に成功した"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Track"
+              examples:
+                track:
+                  summary: "オリジナル音源を持つトラック"
+                  value:
+                    id: "track-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                    releaseId: "release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    title: "Example Track"
+                    discNumber: 1
+                    trackNumber: 1
+                    durationMs: 180000
+                    artistCredits:
+                      - artistId: "artist-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        name: "Example Artist"
+                        joinPhrase: null
+                    originalAudioFile:
+                      id: "2f1c75fc-55de-4d4b-8992-76050f65dff0"
+                      mediaType: "audio/wav"
+                      playbackUrl: "https://media.example.com/original.wav"
+                      sampleRate: 44100
+                      bitDepth: 16
+                      channels: 2
+                      bitrate: 1411200
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "500":
+          "$ref": "#/components/responses/InternalServerError"
+components:
+  parameters:
+    Cursor:
+      name: "cursor"
+      in: "query"
+      required: false
+      description: |
+        取得開始位置を指定するカーソル。
+        初回または先頭から取得し直す場合は省略する。
+        続きの取得では前のレスポンスのnextCursorをそのまま指定し、内容を解釈してはならない。
+      schema:
+        type: "string"
+        minLength: 1
+    PageLimit:
+      name: "limit"
+      in: "query"
+      required: false
+      description: |
+        1ページの最大件数。
+        継続リクエストで変更してもよい
+      schema:
+        type: "integer"
+        minimum: 1
+        maximum: 100
+        default: 30
+    ReleaseId:
+      name: "releaseId"
+      in: "path"
+      required: true
+      description: "Releaseの識別子"
+      schema:
+        "$ref": "#/components/schemas/ReleaseId"
+    TrackId:
+      name: "trackId"
+      in: "path"
+      required: true
+      description: "Trackの識別子"
+      schema:
+        "$ref": "#/components/schemas/TrackId"
+  schemas:
+    ReleaseId:
+      type: "string"
+      pattern: "^release-[0-9a-f]{64}$"
+      description: "リリースの識別子"
+    TrackId:
+      type: "string"
+      pattern: "^track-[0-9a-f]{64}$"
+      description: "トラックの識別子"
+    ArtistId:
+      type: "string"
+      pattern: "^artist-[0-9a-f]{64}$"
+      description: "アーティストの識別子"
+    AudioFileId:
+      type: "string"
+      format: "uuid"
+      pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+      description: "音源ファイルの識別子"
+    ReleaseTitle:
+      type: "string"
+      minLength: 1
+      description: "リリースのタイトル"
+    TrackTitle:
+      type: "string"
+      minLength: 1
+      description: "トラックのタイトル"
+    ArtistName:
+      type: "string"
+      minLength: 1
+      description: "アーティスト名"
+    ReleaseDate:
+      type: "string"
+      pattern: "^[0-9]{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12][0-9]|3[01]))?)?$"
+      description: "リリース日"
+    DiscNumber:
+      type: "integer"
+      minimum: 1
+      description: "ディスク番号"
+    TrackNumber:
+      type: "integer"
+      minimum: 1
+      description: "トラック番号"
+    TrackDurationMs:
+      type: "integer"
+      minimum: 0
+      description: "トラックの再生時間（ミリ秒）"
+    ArtistCredits:
+      type: "array"
+      minItems: 1
+      items:
+        "$ref": "#/components/schemas/ArtistCredit"
+      description: "表示順に並べたアーティストクレジット"
+    ArtistCredit:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "artistId"
+        - "name"
+        - "joinPhrase"
+      properties:
+        artistId:
+          "$ref": "#/components/schemas/ArtistId"
+        name:
+          "$ref": "#/components/schemas/ArtistName"
+        joinPhrase:
+          type:
+            - "string"
+            - "null"
+          description: |
+            次のアーティストとの連結句。
+            アーティストクレジットが単一要素の場合はnullとする。
+      description: "表示順に並べるアーティストクレジットの1要素"
+    ReleaseSummary:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "title"
+        - "releaseDate"
+        - "artistCredits"
+      properties:
+        id:
+          "$ref": "#/components/schemas/ReleaseId"
+        title:
+          "$ref": "#/components/schemas/ReleaseTitle"
+        releaseDate:
+          "$ref": "#/components/schemas/ReleaseDate"
+        artistCredits:
+          "$ref": "#/components/schemas/ArtistCredits"
+      description: "一覧表示用のリリース概要"
+    TrackSummary:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "releaseId"
+        - "title"
+        - "discNumber"
+        - "trackNumber"
+        - "durationMs"
+        - "artistCredits"
+      properties:
+        id:
+          "$ref": "#/components/schemas/TrackId"
+        releaseId:
+          "$ref": "#/components/schemas/ReleaseId"
+        title:
+          "$ref": "#/components/schemas/TrackTitle"
+        discNumber:
+          "$ref": "#/components/schemas/DiscNumber"
+        trackNumber:
+          "$ref": "#/components/schemas/TrackNumber"
+        durationMs:
+          "$ref": "#/components/schemas/TrackDurationMs"
+        artistCredits:
+          "$ref": "#/components/schemas/ArtistCredits"
+      description: "収録曲一覧用の楽曲情報"
+    Release:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "title"
+        - "releaseDate"
+        - "artistCredits"
+        - "tracks"
+      properties:
+        id:
+          "$ref": "#/components/schemas/ReleaseId"
+        title:
+          "$ref": "#/components/schemas/ReleaseTitle"
+        releaseDate:
+          "$ref": "#/components/schemas/ReleaseDate"
+        artistCredits:
+          "$ref": "#/components/schemas/ArtistCredits"
+        tracks:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/TrackSummary"
+          description: |
+            リリースに含まれる収録トラック一覧。
+            ディスク番号・トラック番号の昇順。
+            番号の重複によって順序が決まらない部分は未定義
+          minItems: 1
+      description: "リリース詳細と全収録曲"
+    AudioFile:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "mediaType"
+        - "playbackUrl"
+        - "sampleRate"
+        - "bitDepth"
+        - "channels"
+        - "bitrate"
+      properties:
+        id:
+          "$ref": "#/components/schemas/AudioFileId"
+        mediaType:
+          type: "string"
+          const: "audio/wav"
+          description: "音源のContent-Type"
+        playbackUrl:
+          type: "string"
+          format: "uri"
+          description: |
+            実際の音源データを配信するURL
+        sampleRate:
+          type: "integer"
+          minimum: 1
+          description: "サンプルレート（Hz）"
+        bitDepth:
+          type: "integer"
+          minimum: 1
+          description: "ビット深度（bit）"
+        channels:
+          type: "integer"
+          minimum: 1
+          description: "チャンネル数"
+        bitrate:
+          type: "integer"
+          minimum: 1
+          description: "ビットレート（bit/s）"
+      description: "オリジナル音源の情報。"
+    Track:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "releaseId"
+        - "title"
+        - "discNumber"
+        - "trackNumber"
+        - "durationMs"
+        - "artistCredits"
+        - "originalAudioFile"
+      properties:
+        id:
+          "$ref": "#/components/schemas/TrackId"
+        releaseId:
+          "$ref": "#/components/schemas/ReleaseId"
+        title:
+          "$ref": "#/components/schemas/TrackTitle"
+        discNumber:
+          "$ref": "#/components/schemas/DiscNumber"
+        trackNumber:
+          "$ref": "#/components/schemas/TrackNumber"
+        durationMs:
+          "$ref": "#/components/schemas/TrackDurationMs"
+        artistCredits:
+          "$ref": "#/components/schemas/ArtistCredits"
+        originalAudioFile:
+          "$ref": "#/components/schemas/AudioFile"
+      description: "楽曲情報と唯一のオリジナル音源"
+    ReleasePage:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "items"
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/ReleaseSummary"
+        nextCursor:
+          type: "string"
+          minLength: 1
+          description: |
+            次ページのカーソル。
+            最終ページでは省略する
+      description: |
+        カーソル方式のリリース一覧。
+        最終ページのitemsは空配列でもよい。
+        nextCursorを含む場合、itemsには1件以上含まれる。
+      dependentSchemas:
+        nextCursor:
+          properties:
+            items:
+              minItems: 1
+            nextCursor: {}
+    Problem:
+      type: "object"
+      additionalProperties: true
+      description: "RFC 9457に準拠したAPIエラーの詳細。"
+      required:
+        - "type"
+        - "title"
+        - "status"
+      properties:
+        type:
+          type: "string"
+          format: "uri-reference"
+          default: "about:blank"
+          description: "エラー種別を識別するURI参照"
+        title:
+          type: "string"
+          description: "エラー種別の短い説明"
+        status:
+          type: "integer"
+          description: "HTTPステータスコード"
+        detail:
+          type: "string"
+          description: "具体的なエラー内容"
+        instance:
+          type: "string"
+          format: "uri-reference"
+          description: "エラー発生を識別するURI参照"
+    BadRequestProblem:
+      description: "識別子の形式、カーソル、またはlimitが不正である"
+      allOf:
+        - "$ref": "#/components/schemas/Problem"
+        - type: "object"
+          properties:
+            status:
+              type: "integer"
+              const: 400
+    NotFoundProblem:
+      description: "指定したリリースまたはトラックが存在しない"
+      allOf:
+        - "$ref": "#/components/schemas/Problem"
+        - type: "object"
+          properties:
+            status:
+              type: "integer"
+              const: 404
+    InternalServerErrorProblem:
+      description: "サーバー内部で予期しないエラーが発生した"
+      allOf:
+        - "$ref": "#/components/schemas/Problem"
+        - type: "object"
+          properties:
+            status:
+              type: "integer"
+              const: 500
+  responses:
+    BadRequest:
+      description: "識別子の形式、カーソル、またはlimitが不正である"
+      content:
+        "application/problem+json":
+          schema:
+            "$ref": "#/components/schemas/BadRequestProblem"
+          example:
+            type: "about:blank"
+            title: "Bad Request"
+            status: 400
+    NotFound:
+      description: "指定したリリースまたはトラックが存在しない"
+      content:
+        "application/problem+json":
+          schema:
+            "$ref": "#/components/schemas/NotFoundProblem"
+          example:
+            type: "about:blank"
+            title: "Not Found"
+            status: 404
+    InternalServerError:
+      description: "サーバー内部で予期しないエラーが発生した"
+      content:
+        "application/problem+json":
+          schema:
+            "$ref": "#/components/schemas/InternalServerErrorProblem"
+          example:
+            type: "about:blank"
+            title: "Internal Server Error"
+            status: 500
