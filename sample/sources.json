@@ -1,0 +1,175 @@
+{
+  "purpose": "Provenance and fixture inventory; embedded audio tags are the music metadata source.",
+  "checked_on": "2026-10-13",
+  "fixture_release_date": "2026-10-13",
+  "fixture_note": "Release titles, dates, and track numbering describe Tonhalle sample groupings, not original commercial releases. No MusicBrainz identifiers are invented.",
+  "conversion": {
+    "format": "WAV",
+    "codec": "pcm_s16le",
+    "metadata_format": "ID3v2.4",
+    "sample_rate_hz": 22050,
+    "bits_per_sample": 16,
+    "channels": 1,
+    "trimmed": false,
+    "note": "Full source recordings downmixed and resampled for repository size. Ogg sources are already lossy; PCM WAV conversion does not restore lost information.",
+    "ffmpeg_version": "7.1",
+    "arguments": [
+      "-map_metadata",
+      "-1",
+      "-fflags",
+      "+bitexact",
+      "-ac",
+      "1",
+      "-ar",
+      "22050",
+      "-c:a",
+      "pcm_s16le"
+    ]
+  },
+  "releases": [
+    {
+      "title": "Bach: Short Preludes (Tonhalle Sample Album)",
+      "release_date": "2026-10-13",
+      "artists": [
+        "Kimiko Ishizaka"
+      ],
+      "sample_type": "album",
+      "tracks": [
+        {
+          "audio_file_id": "925eda40-54cb-4af4-9579-6811fc7477ac",
+          "title": "Prelude No. 15 in G major, BWV 860",
+          "disc_number": 1,
+          "track_number": 1,
+          "artists": [
+            "Kimiko Ishizaka"
+          ],
+          "source": {
+            "file_page": "https://commons.wikimedia.org/wiki/File:Kimiko_Ishizaka_-_Bach_-_Well-Tempered_Clavier,_Book_1_-_29_Prelude_No._15_in_G_major,_BWV_860.ogg",
+            "file_page_revision": "https://commons.wikimedia.org/w/index.php?title=File%3AKimiko+Ishizaka+-+Bach+-+Well-Tempered+Clavier%2C+Book+1+-+29+Prelude+No.+15+in+G+major%2C+BWV+860.ogg&oldid=642970990",
+            "download_url": "https://upload.wikimedia.org/wikipedia/commons/8/81/Kimiko_Ishizaka_-_Bach_-_Well-Tempered_Clavier%2C_Book_1_-_29_Prelude_No._15_in_G_major%2C_BWV_860.ogg",
+            "size_bytes": 1253487,
+            "sha1": "3703869d89f4cb70b40f72d6eb72a81ce4b66a08",
+            "sha256": "11c98a22f749c9d406d5dabd6cbf665b254e6830177f4a5e59ced3ded617971a",
+            "composer": "Johann Sebastian Bach",
+            "rights_status": "CC0-1.0",
+            "rights_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+            "rights_basis": "The file page explicitly identifies Kimiko Ishizaka as the performer and dedicates this recording under CC0-1.0. Composition by Johann Sebastian Bach (died 1750).",
+            "provider": "Open Well-Tempered Clavier (https://welltemperedclavier.org/) via Wikimedia Commons"
+          },
+          "duration_ms": 55200,
+          "track_id": "track-f2115a5abdab584f5c22d4e6053faf75b3bad0dc75b84ec13827ca9943ddcdc4",
+          "path": "release-ea57599b1f0c33d1d943ff20226ad7d418d79a1436217827aa09812607eaad64/925eda40-54cb-4af4-9579-6811fc7477ac.wav",
+          "size_bytes": 2436298,
+          "sha256": "bed6f1e976e887187e3c8e50bb04404d8a408aff514ae6998973fa73c32bea8f"
+        },
+        {
+          "audio_file_id": "86493bdf-ed7d-494a-9282-d941b605bff6",
+          "title": "Prelude No. 23 in B major, BWV 868",
+          "disc_number": 1,
+          "track_number": 2,
+          "artists": [
+            "Kimiko Ishizaka"
+          ],
+          "source": {
+            "file_page": "https://commons.wikimedia.org/wiki/File:Kimiko_Ishizaka_-_Bach_-_Well-Tempered_Clavier,_Book_1_-_45_Prelude_No._23_in_B_major,_BWV_868.ogg",
+            "file_page_revision": "https://commons.wikimedia.org/w/index.php?title=File%3AKimiko+Ishizaka+-+Bach+-+Well-Tempered+Clavier%2C+Book+1+-+45+Prelude+No.+23+in+B+major%2C+BWV+868.ogg&oldid=989894323",
+            "download_url": "https://upload.wikimedia.org/wikipedia/commons/6/63/Kimiko_Ishizaka_-_Bach_-_Well-Tempered_Clavier%2C_Book_1_-_45_Prelude_No._23_in_B_major%2C_BWV_868.ogg",
+            "size_bytes": 1342709,
+            "sha1": "097e8794985a2fcbeafa450f929b21560197a844",
+            "sha256": "2f9c78232f2b39e247d5699bfe300ea51809e6c6efbcc94b889ca2f2393d6404",
+            "composer": "Johann Sebastian Bach",
+            "rights_status": "CC0-1.0",
+            "rights_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+            "rights_basis": "The file page explicitly identifies Kimiko Ishizaka as the performer and dedicates this recording under CC0-1.0. Composition by Johann Sebastian Bach (died 1750).",
+            "provider": "Open Well-Tempered Clavier (https://welltemperedclavier.org/) via Wikimedia Commons"
+          },
+          "duration_ms": 59960,
+          "track_id": "track-7ffc49de9921bb0c1ea61ef8364865fce233a9dc84a029a369ac9561dd5d8270",
+          "path": "release-ea57599b1f0c33d1d943ff20226ad7d418d79a1436217827aa09812607eaad64/86493bdf-ed7d-494a-9282-d941b605bff6.wav",
+          "size_bytes": 2646214,
+          "sha256": "a34152531af2c6e90123486895276f92db068580c3e94e025ab406f71c6c7bdf"
+        }
+      ],
+      "release_id": "release-ea57599b1f0c33d1d943ff20226ad7d418d79a1436217827aa09812607eaad64"
+    },
+    {
+      "title": "Bach: Prelude No. 11 (Tonhalle Sample Single)",
+      "release_date": "2026-10-13",
+      "artists": [
+        "Kimiko Ishizaka"
+      ],
+      "sample_type": "single",
+      "tracks": [
+        {
+          "audio_file_id": "b6a68368-548d-49d9-bbdb-cb1e0ee6138a",
+          "title": "Prelude No. 11 in F major, BWV 856",
+          "disc_number": 1,
+          "track_number": 1,
+          "artists": [
+            "Kimiko Ishizaka"
+          ],
+          "source": {
+            "file_page": "https://commons.wikimedia.org/wiki/File:Kimiko_Ishizaka_-_Bach_-_Well-Tempered_Clavier,_Book_1_-_21_Prelude_No._11_in_F_major,_BWV_856.ogg",
+            "file_page_revision": "https://commons.wikimedia.org/w/index.php?title=File%3AKimiko+Ishizaka+-+Bach+-+Well-Tempered+Clavier%2C+Book+1+-+21+Prelude+No.+11+in+F+major%2C+BWV+856.ogg&oldid=642971007",
+            "download_url": "https://upload.wikimedia.org/wikipedia/commons/4/4a/Kimiko_Ishizaka_-_Bach_-_Well-Tempered_Clavier%2C_Book_1_-_21_Prelude_No._11_in_F_major%2C_BWV_856.ogg",
+            "size_bytes": 1465967,
+            "sha1": "725293b87d9f375b4a7ac0986e17288edf73b7a4",
+            "sha256": "e758e3aa80874f3dae7a2e79e9240439d601f6b6f130334a815a4ce7f6149616",
+            "composer": "Johann Sebastian Bach",
+            "rights_status": "CC0-1.0",
+            "rights_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+            "rights_basis": "The file page explicitly identifies Kimiko Ishizaka as the performer and dedicates this recording under CC0-1.0. Composition by Johann Sebastian Bach (died 1750).",
+            "provider": "Open Well-Tempered Clavier (https://welltemperedclavier.org/) via Wikimedia Commons"
+          },
+          "duration_ms": 64013,
+          "track_id": "track-62c533d6746f89a5eb6e3582c1371f1a47db7208a3a5859eae37abef31203556",
+          "path": "release-21fb4363f6c25b9a69da619ace8e12bcb27c9b1047a68de87a3433ed43321ac2/b6a68368-548d-49d9-bbdb-cb1e0ee6138a.wav",
+          "size_bytes": 2824968,
+          "sha256": "0245eaa3e1626e77ac4ff432a69a527d806c81b6ccd9e5c8682724e350a1014c"
+        }
+      ],
+      "release_id": "release-21fb4363f6c25b9a69da619ace8e12bcb27c9b1047a68de87a3433ed43321ac2"
+    },
+    {
+      "release_id": "release-1ac1508956628bfc1927b6fde571efbd604820dbacdeb82ca5d5d58eafe76be7",
+      "title": "Vieuxtemps: Caprice 'Yankee Doodle' (Tonhalle Sample Collaboration)",
+      "release_date": "2026-10-13",
+      "artists": [
+        "Elias Breeskin",
+        "Rudolph Gruen"
+      ],
+      "sample_type": "single",
+      "tracks": [
+        {
+          "track_id": "track-43cb6e500678cd2918d1ae445ee83e564c7729e7a12c0e47ee1ca20f9effeb31",
+          "audio_file_id": "f8c2a61f-a7ec-4fdb-b154-44f38aa0d7c7",
+          "path": "release-1ac1508956628bfc1927b6fde571efbd604820dbacdeb82ca5d5d58eafe76be7/f8c2a61f-a7ec-4fdb-b154-44f38aa0d7c7.wav",
+          "title": "Caprice 'Yankee Doodle'",
+          "disc_number": 1,
+          "track_number": 1,
+          "artists": [
+            "Elias Breeskin",
+            "Rudolph Gruen"
+          ],
+          "duration_ms": 184469,
+          "size_bytes": 8137150,
+          "sha256": "eca6b59f80a8a1f5ba90186bdc9056a89e6eb0403efd16e97c71ef09e9cc2666",
+          "source": {
+            "file_page": "https://commons.wikimedia.org/wiki/File:CC0-CH_-_Elias_Breeskin_and_Rudolph_Gruen_-_Caprice_-_Yankee_Doodle_-_Brunswick-13012b-3651.flac",
+            "file_page_revision": "https://commons.wikimedia.org/w/index.php?title=File%3ACC0-CH+-+Elias+Breeskin+and+Rudolph+Gruen+-+Caprice+-+Yankee+Doodle+-+Brunswick-13012b-3651.flac&oldid=1127397426",
+            "download_url": "https://upload.wikimedia.org/wikipedia/commons/2/25/CC0-CH_-_Elias_Breeskin_and_Rudolph_Gruen_-_Caprice_-_Yankee_Doodle_-_Brunswick-13012b-3651.flac",
+            "size_bytes": 98500623,
+            "sha1": "d2985fa25dbbc9333a9e4a97d228dcd5f8cce179",
+            "sha256": "d71abb3ff33645dc12153bb36e3b7d5a1d40cbcb4b415b6ca5d240a246fcbe1b",
+            "composer": "Henri Vieuxtemps",
+            "rights_status": "Public domain (expired copyright; Public Domain Mark)",
+            "rights_url": "https://creativecommons.org/publicdomain/mark/1.0/",
+            "rights_basis": "The CC-ZERO-PROJECT file page marks the recording public domain, not CC0. Recorded and first released in New York in February 1920; pre-1923 recordings are public domain in the US from 2022. Composition by Vieuxtemps (died 1881); no arranger is listed.",
+            "original_release_date": "1920-02",
+            "us_recording_term_reference": "https://www.copyright.gov/music-modernization/pre1972-soundrecordings/"
+          }
+        }
+      ]
+    }
+  ]
+}

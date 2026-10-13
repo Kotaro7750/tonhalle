@@ -1,3 +1,4 @@
 [tools]
+"git-lfs" = "3.8.0"
 "java" = { version = "openjdk" } # This is for openapi-generator-cli, which requires Java to run.
 "npm:@openapitools/openapi-generator-cli" = { version = "latest", npm_args = "--ignore-scripts=false"}
