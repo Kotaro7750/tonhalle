@@ -12,6 +12,7 @@
 ## 各エンティティの定義
 ### Release
 アルバムやシングルといったリリース単位のメタデータを保持する。
+通常盤や特別盤などの版の違いは、異なるリリース名として表現する。
 
 | 属性 | 型 | 必須性 | 意味・制約 |
 | --- | --- | --- | --- |
@@ -21,6 +22,8 @@
 
 ### Track
 Release内における個々の楽曲単位のメタデータを保持する。
+Trackは単一のReleaseのみに所属する。
+同じ録音が異なるReleaseに収録されている場合も、それぞれ別のTrackとして扱う。
 
 | 属性 | 型 | 必須性 | 意味・制約 |
 | --- | --- | --- | --- |
@@ -97,16 +100,17 @@ AudioFile以外のエンティティは、音源データ中のメタデータ�
 
 1. 下表に従ってメタデータを取得し、正規化する
 1. 取得したメタデータを元にハッシュ入力を決定する
-  - 有効なMBIDがある場合：`["tonhalle-id-v0", 種別, "mbid", MBID]`
-  - 有効なMBIDがない場合：`["tonhalle-id-v0", 種別, "metadata", メタデータ配列]`
+   - Artistで有効なMBIDがある場合：`["tonhalle-id-v0", 種別, "mbid", MBID]`
+   - それ以外の場合：`["tonhalle-id-v0", 種別, "metadata", メタデータ配列]`
 1. `{種別}-{64桁のハッシュ値}`を識別子とする
 
+ReleaseとTrackは、MBIDの有無にかかわらずメタデータ配列から識別子を生成する。
 
-| エンティティ | 種別 | MBID | メタデータ配列 |
+| エンティティ | 種別 | 識別子生成に使用するMBID | メタデータ配列 |
 | --- | --- | --- | --- |
 | Artist | `artist` | `musicbrainz_albumartistid`と`musicbrainz_artistid`から、それぞれ独立して個々のArtist MBIDを取得する | `[name]` |
-| Release | `release` | Release MBID（`musicbrainz_albumid`） | `[artistIds, title, releaseDate]` |
-| Track | `track` | Track MBID（`musicbrainz_trackid`） | `[releaseId, discNumber, trackNumber, title]` |
+| Release | `release` | 使用しない | `[artistIds, title, releaseDate]` |
+| Track | `track` | 使用しない | `[releaseId, discNumber, trackNumber, title]` |
 
 
 なお、Artistに関しては1つの音源データから複数のエンティティを生成する場合がある。
@@ -115,7 +119,7 @@ AudioFile以外のエンティティは、音源データ中のメタデータ�
 ### メタデータの取得と正規化
 | 値 | 取得元 | 正規化手順・欠落時の扱い |
 | --- | --- | --- |
-| MBID | — | 共通の文字列正規化を適用し、ハイフン付きUUID形式として検証する。有効な場合は英字を小文字に統一し、任意の情報であり、欠落・不正値は有効なMBIDなしとして扱う |
+| ArtistのMBID | — | 共通の文字列正規化を適用し、ハイフン付きUUID形式として検証する。有効な場合は英字を小文字に統一し、任意の情報であり、欠落・不正値は有効なMBIDなしとして扱う |
 | `name` | リリースまたはトラックのクレジットに含まれるアーティスト名。明示的な複数値は各値を個別に取得する。単一の文字列でも、同じクレジットの有効なArtist MBID一覧などから人数が分かる場合は、下記の規則で分割する | 各名前に共通の文字列正規化を適用する |
 | `artistIds` | リリースにクレジットされたArtistの識別子。トラックにクレジットされたArtistの識別子は含めない | クレジットの表示順に並べた配列とする |
 | Releaseの`title` | リリース名 | 共通の文字列正規化を適用する |
