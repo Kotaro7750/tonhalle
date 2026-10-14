@@ -6,13 +6,8 @@ use std::{
 };
 
 use axum::http::HeaderValue;
-use serde::Deserialize;
+use clap::Args;
 use url::Url;
-
-/// A failure to load or deserialize application settings.
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub(crate) struct ConfigLoadError(#[from] ::config::ConfigError);
 
 /// A failure to validate the configured browser origin.
 #[derive(Debug, thiserror::Error)]
@@ -28,52 +23,54 @@ pub(crate) enum CorsOriginError {
     HeaderValue(#[from] axum::http::header::InvalidHeaderValue),
 }
 
-/// Server settings loaded from the TONHALLE environment namespace.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct TonhalleConfig {
-    #[serde(default = "default_address")]
+/// Server settings parsed from CLI arguments or the TONHALLE environment namespace.
+#[derive(Debug, Args)]
+pub(crate) struct ServerConfig {
+    /// IP interface used by the HTTP listener.
+    #[arg(
+        long = "listen-address",
+        env = "TONHALLE_LISTEN_ADDRESS",
+        default_value = "0.0.0.0"
+    )]
     listen_address: IpAddr,
-    #[serde(default = "default_port")]
+    /// TCP port used by the HTTP listener.
+    #[arg(
+        long = "listen-port",
+        env = "TONHALLE_LISTEN_PORT",
+        default_value_t = 3000
+    )]
     listen_port: u16,
+    /// Optional browser origin permitted to read API responses.
+    #[arg(long = "cors-origin", env = "TONHALLE_CORS_ORIGIN")]
     cors_origin: Option<String>,
+    /// Audio storage and playback delivery settings.
+    #[command(flatten)]
     content_storage: ContentStorageConfig,
 }
 
 /// Settings for reading audio files and linking to their delivery endpoint.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Args)]
 pub(crate) struct ContentStorageConfig {
+    /// Directory scanned for stored audio releases.
+    #[arg(
+        id = "content_storage_root_path",
+        long = "content-storage--root-path",
+        env = "TONHALLE_CONTENT_STORAGE__ROOT_PATH"
+    )]
     root_path: PathBuf,
+    /// Delivery endpoint used to build playback links.
+    #[arg(
+        id = "content_storage_playback_url_base",
+        long = "content-storage--playback-url-base",
+        env = "TONHALLE_CONTENT_STORAGE__PLAYBACK_URL_BASE"
+    )]
     playback_url_base: Url,
 }
 
-/// Binds all IPv4 interfaces when no listener address is configured.
-fn default_address() -> IpAddr {
-    IpAddr::from([0, 0, 0, 0])
-}
-
-/// Uses the development API port when no listener port is configured.
-fn default_port() -> u16 {
-    3000
-}
-
-impl TonhalleConfig {
+impl ServerConfig {
     /// Exposes the settings used to construct music storage.
     pub(crate) fn content_storage(&self) -> &ContentStorageConfig {
         &self.content_storage
-    }
-
-    /// Reads TONHALLE environment variables using double underscores for nested settings.
-    pub(crate) fn load() -> Result<Self, ConfigLoadError> {
-        Ok(::config::Config::builder()
-            .add_source(
-                ::config::Environment::with_prefix("TONHALLE")
-                    .separator("__")
-                    .prefix_separator("_"),
-            )
-            .build()?
-            .try_deserialize()?)
     }
 
     /// Combines the configured IP and port for listener binding.
@@ -113,45 +110,48 @@ impl ContentStorageConfig {
     }
 }
 
-/// Verifies configuration defaults and input validation.
+/// Verifies the application-specific browser-origin constraints.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+
+    /// Constructs settings without invoking command-line or environment parsing.
+    fn config(origin: Option<&str>) -> ServerConfig {
+        ServerConfig {
+            listen_address: IpAddr::from([127, 0, 0, 1]),
+            listen_port: 3000,
+            cors_origin: origin.map(str::to_owned),
+            content_storage: ContentStorageConfig {
+                root_path: PathBuf::from("../sample"),
+                playback_url_base: Url::parse("http://localhost:8000/").unwrap(),
+            },
+        }
+    }
 
     #[test]
-    fn tonhalle_config_defaults_the_listener_and_rejects_invalid_inputs() {
-        let mut value = json!({"content_storage": {"root_path": "../sample", "playback_url_base": "http://localhost:8000/"}});
-        let config: TonhalleConfig = serde_json::from_value(value.clone()).unwrap();
+    fn cors_origin_accepts_absent_or_single_http_origins() {
+        assert_eq!(config(None).cors_origin().unwrap(), None);
+        for origin in ["http://localhost:5173", "https://example.com"] {
+            assert_eq!(
+                config(Some(origin)).cors_origin().unwrap(),
+                Some(HeaderValue::from_str(origin).unwrap())
+            );
+        }
+    }
 
-        assert_eq!(config.listen_address().to_string(), "0.0.0.0:3000");
-        assert_eq!(config.cors_origin().unwrap(), None);
-
-        value["listen_address"] = json!("::1");
-        value["cors_origin"] = json!("http://localhost:5173");
-        let config: TonhalleConfig = serde_json::from_value(value.clone()).unwrap();
-
-        assert_eq!(config.listen_address().to_string(), "[::1]:3000");
-        assert!(config.cors_origin().unwrap().is_some());
-
+    #[test]
+    fn cors_origin_rejects_values_that_are_not_single_http_origins() {
         for origin in [
             "*",
             "https://example.com/path",
             "https://example.com/",
+            "https://example.com?query=value",
+            "https://example.com#fragment",
+            "https://user@example.com",
+            "ftp://example.com",
             "null",
         ] {
-            value["cors_origin"] = json!(origin);
-
-            assert!(
-                serde_json::from_value::<TonhalleConfig>(value.clone())
-                    .unwrap()
-                    .cors_origin()
-                    .is_err()
-            );
+            assert!(config(Some(origin)).cors_origin().is_err(), "{origin}");
         }
-
-        value["listen_address"] = json!("invalid");
-
-        assert!(serde_json::from_value::<TonhalleConfig>(value).is_err());
     }
 }

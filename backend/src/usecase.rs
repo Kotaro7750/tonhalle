@@ -12,7 +12,7 @@ use crate::{
 
 mod build_metadata_index;
 
-pub(crate) use build_metadata_index::BuildMetadataIndexUseCase;
+pub(crate) use build_metadata_index::{BuildMetadataIndexError, BuildMetadataIndexUseCase};
 
 /// Browses accepted releases through the metadata index.
 #[derive(Clone)]

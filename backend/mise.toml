@@ -3,7 +3,7 @@ rust = "1.99"
 
 [tasks.dev]
 dir = "."
-run = "cargo run --locked"
+run = "cargo run --locked -- server"
 
 [tasks.dev.env]
 TONHALLE_CONTENT_STORAGE__ROOT_PATH = "../sample"

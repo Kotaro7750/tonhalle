@@ -10,7 +10,7 @@ async-trait = "0.1"
 axum = "0.8"
 base64 = "0.23"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-config = { version = "0.15", default-features = false }
+clap = { version = "4", features = ["derive", "env"] }
 hex = "0.4"
 itertools = "0.15"
 lofty = "0.25"
