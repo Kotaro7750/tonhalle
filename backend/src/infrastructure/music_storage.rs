@@ -1,4 +1,4 @@
-//! Scans filesystem WAV files and reads their bytes and storage identities.
+//! Scans filesystem audio files and reads their bytes and storage identities.
 
 use std::{
     collections::BTreeMap,
@@ -18,7 +18,7 @@ use crate::{
     port::{AudioScanFailure, MusicStorage, ReleaseScanFailure, ScanReleasesError},
 };
 
-/// A read-only filesystem adapter for stored WAV audio.
+/// A read-only filesystem adapter for stored audio files.
 pub(crate) struct FileSystemMusicStorage {
     root_path: PathBuf,
     playback_url_base: Url,
@@ -56,7 +56,7 @@ enum ReadAudioFileError {
     /// The filename does not preserve a valid UUID v4 audio identity.
     #[error(transparent)]
     InvalidAudioId(#[from] ParseAudioFileIdError),
-    /// The WAV path must be rejected without following a symbolic link or reading a directory.
+    /// The audio path must be rejected without following a symbolic link or reading a directory.
     #[error("audio object must be a regular file")]
     NotRegularFile,
 }
@@ -200,7 +200,7 @@ impl FileSystemMusicStorage {
 }
 
 impl MusicStorage for FileSystemMusicStorage {
-    /// Groups WAV paths by their stored release directory and constructs domain releases.
+    /// Groups audio paths by their stored release directory and constructs domain releases.
     fn scan_releases(&self) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError> {
         let mut groups: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
 
@@ -223,10 +223,13 @@ impl MusicStorage for FileSystemMusicStorage {
                 groups.entry(path.to_path_buf()).or_default();
             }
 
-            if !path
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("wav"))
-            {
+            if !path.extension().is_some_and(|extension| {
+                [
+                    "wav", "flac", "aac", "m4a", "mp4", "ogg", "oga", "opus", "spx", "mp3",
+                ]
+                .iter()
+                .any(|supported| extension.eq_ignore_ascii_case(supported))
+            }) {
                 continue;
             }
 

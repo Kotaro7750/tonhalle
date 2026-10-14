@@ -34,7 +34,7 @@ pub(crate) struct Track {
     title: String,
     disc_number: u32,
     track_number: u32,
-    duration_ms: u32,
+    duration_ms: Option<u32>,
     artist_credits: Vec<ArtistCredit>,
     original_audio_file: AudioFile,
 }
@@ -47,7 +47,7 @@ impl Track {
         title: &str,
         disc_number: &str,
         track_number: &str,
-        duration_ms: u128,
+        duration_ms: Option<u128>,
         artist_names: &[String],
         artist_mbids: &[String],
         original_audio_file: AudioFile,
@@ -66,7 +66,8 @@ impl Track {
         ]));
 
         let duration_ms = duration_ms
-            .try_into()
+            .map(u32::try_from)
+            .transpose()
             .map_err(|_| TrackValidationError::DurationOverflow)?;
 
         Ok(Self {
@@ -107,7 +108,7 @@ impl Track {
     }
 
     /// Provides playback duration in milliseconds, including valid zero durations.
-    pub(crate) fn duration_ms(&self) -> u32 {
+    pub(crate) fn duration_ms(&self) -> Option<u32> {
         self.duration_ms
     }
 
@@ -227,14 +228,20 @@ mod tests {
         let release = fixture.build_release_metadata().unwrap();
 
         for duration in [0, u128::from(u32::MAX)] {
-            fixture.duration_ms = duration;
+            fixture.duration_ms = Some(duration);
 
             let (track, _) = fixture.build_track(release.id()).unwrap();
 
-            assert_eq!(u128::from(track.duration_ms()), duration);
+            assert_eq!(track.duration_ms().map(u128::from), Some(duration));
         }
 
-        fixture.duration_ms = u128::from(u32::MAX) + 1;
+        let known_id = fixture.build_track(release.id()).unwrap().0.id().clone();
+        fixture.duration_ms = None;
+        let unknown = fixture.build_track(release.id()).unwrap().0;
+        assert!(unknown.duration_ms().is_none());
+        assert_eq!(unknown.id(), &known_id);
+
+        fixture.duration_ms = Some(u128::from(u32::MAX) + 1);
 
         assert!(matches!(
             fixture.build_track(release.id()),

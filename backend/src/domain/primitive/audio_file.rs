@@ -21,35 +21,40 @@ pub(crate) struct AudioFile {
     id: AudioFileId,
     object_key: String,
     playback_url: Url,
+    media_type: &'static str,
     sample_rate: u32,
-    bit_depth: u32,
+    bit_depth: Option<u32>,
     channels: u32,
-    bitrate: u32,
+    bitrate: Option<u32>,
 }
 
 impl AudioFile {
     /// Validates playback properties and retains the existing storage identity.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         id: AudioFileId,
         object_key: String,
         playback_url: Url,
+        media_type: &'static str,
         sample_rate: u32,
-        bit_depth: u32,
+        bit_depth: Option<u32>,
         channels: u32,
-        bitrate: u64,
+        bitrate: Option<u64>,
     ) -> Result<Self, AudioFileValidationError> {
-        if [sample_rate, bit_depth, channels].contains(&0) || bitrate == 0 {
+        if [sample_rate, channels].contains(&0) || bit_depth == Some(0) || bitrate == Some(0) {
             return Err(AudioFileValidationError::MissingProperties);
         }
 
         let bitrate = bitrate
-            .try_into()
+            .map(u32::try_from)
+            .transpose()
             .map_err(|_| AudioFileValidationError::BitrateOverflow)?;
 
         Ok(Self {
             id,
             object_key,
             playback_url,
+            media_type,
             sample_rate,
             bit_depth,
             channels,
@@ -72,13 +77,18 @@ impl AudioFile {
         &self.playback_url
     }
 
+    /// Provides the detected audio content type.
+    pub(crate) fn media_type(&self) -> &'static str {
+        self.media_type
+    }
+
     /// Provides the decoded sampling frequency in hertz.
     pub(crate) fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
 
     /// Provides the number of bits used for each audio sample.
-    pub(crate) fn bit_depth(&self) -> u32 {
+    pub(crate) fn bit_depth(&self) -> Option<u32> {
         self.bit_depth
     }
 
@@ -88,7 +98,7 @@ impl AudioFile {
     }
 
     /// Provides the audio bitrate in bits per second.
-    pub(crate) fn bitrate(&self) -> u32 {
+    pub(crate) fn bitrate(&self) -> Option<u32> {
         self.bitrate
     }
 }
@@ -106,10 +116,10 @@ mod tests {
 
             match field {
                 0 => invalid.sample_rate = 0,
-                1 => invalid.bit_depth = 0,
+                1 => invalid.bit_depth = Some(0),
                 2 => invalid.channels = 0,
-                3 => invalid.bitrate = 0,
-                4 => invalid.bitrate = u64::from(u32::MAX) + 1,
+                3 => invalid.bitrate = Some(0),
+                4 => invalid.bitrate = Some(u64::from(u32::MAX) + 1),
                 _ => unreachable!(),
             }
 
@@ -121,12 +131,30 @@ mod tests {
             }
         }
 
+        for media_type in [
+            "audio/wav",
+            "audio/flac",
+            "audio/mpeg",
+            "audio/aac",
+            "audio/mp4",
+            "audio/ogg",
+        ] {
+            let mut missing_precision = sample_fixture().audio_file;
+            missing_precision.media_type = media_type;
+            missing_precision.bit_depth = None;
+            missing_precision.bitrate = None;
+            let audio = missing_precision.build().unwrap();
+            assert!(audio.bit_depth().is_none());
+            assert!(audio.bitrate().is_none());
+            assert_eq!(audio.id(), missing_precision.id);
+        }
+
         let mut valid = sample_fixture().audio_file;
-        valid.bitrate = u64::from(u32::MAX);
+        valid.bitrate = Some(u64::from(u32::MAX));
 
         let audio = valid.build().unwrap();
 
-        assert_eq!(audio.bitrate(), u32::MAX);
+        assert_eq!(audio.bitrate(), Some(u32::MAX));
         assert_eq!(audio.id(), valid.id);
         assert_eq!(audio.object_key(), valid.object_key);
         assert_eq!(audio.playback_url(), &valid.playback_url);

@@ -1,6 +1,6 @@
 [package]
 name = "tonhalle_api"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["OpenAPI Generator team and contributors"]
 description = "音楽再生・管理アプリケーション TonhalleのAPI"
 license = "MIT"

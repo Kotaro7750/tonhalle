@@ -17,8 +17,8 @@ pub(crate) fn release_metadata(
     ReleaseMetadata::new(
         raw.release_title(),
         raw.release_date(),
-        raw.release_artist_names(),
-        raw.release_artist_mbids(),
+        raw.release_credit().names(),
+        raw.release_credit().mbids(),
     )
 }
 
@@ -43,15 +43,16 @@ pub(crate) fn sample_fixture() -> MetadataFixture {
         },
         disc_number: "1".into(),
         track_number: "1".into(),
-        duration_ms: 1000,
+        duration_ms: Some(1000),
         audio_file: AudioFixture {
             id: "2f1c75fc-55de-4d4b-8992-76050f65dff0".parse().unwrap(),
             object_key: "release/example.wav".into(),
             playback_url: "https://example.com/example.wav".parse().unwrap(),
             sample_rate: 44100,
-            bit_depth: 16,
+            bit_depth: Some(16),
+            media_type: "audio/wav",
             channels: 2,
-            bitrate: 1411200,
+            bitrate: Some(1411200),
         },
     }
 }
@@ -74,9 +75,10 @@ pub(crate) struct AudioFixture {
     pub(crate) object_key: String,
     pub(crate) playback_url: url::Url,
     pub(crate) sample_rate: u32,
-    pub(crate) bit_depth: u32,
+    pub(crate) bit_depth: Option<u32>,
+    pub(crate) media_type: &'static str,
     pub(crate) channels: u32,
-    pub(crate) bitrate: u64,
+    pub(crate) bitrate: Option<u64>,
 }
 
 impl AudioFixture {
@@ -86,6 +88,7 @@ impl AudioFixture {
             self.id,
             self.object_key.clone(),
             self.playback_url.clone(),
+            self.media_type,
             self.sample_rate,
             self.bit_depth,
             self.channels,
@@ -103,7 +106,7 @@ pub(crate) struct MetadataFixture {
     pub(crate) track_artists: CreditFixture,
     pub(crate) disc_number: String,
     pub(crate) track_number: String,
-    pub(crate) duration_ms: u128,
+    pub(crate) duration_ms: Option<u128>,
     pub(crate) audio_file: AudioFixture,
 }
 
@@ -114,25 +117,26 @@ impl From<&RawMetadata> for MetadataFixture {
             release_title: source.release_title().to_owned(),
             release_date: source.release_date().to_owned(),
             release_artists: CreditFixture {
-                names: source.release_artist_names().to_vec(),
-                mbids: source.release_artist_mbids().to_vec(),
+                names: source.release_credit().names().to_vec(),
+                mbids: source.release_credit().mbids().to_vec(),
             },
             track_title: source.track_title().to_owned(),
             track_artists: CreditFixture {
-                names: source.track_artist_names().to_vec(),
-                mbids: source.track_artist_mbids().to_vec(),
+                names: source.track_credit().names().to_vec(),
+                mbids: source.track_credit().mbids().to_vec(),
             },
             disc_number: source.disc_number().to_owned(),
             track_number: source.track_number().to_owned(),
-            duration_ms: source.duration_ms(),
+            duration_ms: source.audio().duration_ms(),
             audio_file: AudioFixture {
                 id: "2f1c75fc-55de-4d4b-8992-76050f65dff0".parse().unwrap(),
                 object_key: "release/example.wav".into(),
                 playback_url: "https://example.com/example.wav".parse().unwrap(),
-                sample_rate: source.sample_rate(),
-                bit_depth: source.bit_depth(),
-                channels: source.channels(),
-                bitrate: source.bitrate(),
+                sample_rate: source.audio().sample_rate(),
+                bit_depth: source.audio().bit_depth(),
+                media_type: source.audio().media_type(),
+                channels: source.audio().channels(),
+                bitrate: source.audio().bitrate(),
             },
         }
     }
@@ -234,13 +238,13 @@ pub(crate) fn sample_audio_with_mbids(
     }
 
     for (key, values) in [
-        (ItemKey::AlbumArtist, source.release_artist_names()),
+        (ItemKey::AlbumArtist, source.release_credit().names()),
         (
             ItemKey::MusicBrainzReleaseArtistId,
-            source.release_artist_mbids(),
+            source.release_credit().mbids(),
         ),
-        (ItemKey::TrackArtist, source.track_artist_names()),
-        (ItemKey::MusicBrainzArtistId, source.track_artist_mbids()),
+        (ItemKey::TrackArtist, source.track_credit().names()),
+        (ItemKey::MusicBrainzArtistId, source.track_credit().mbids()),
     ] {
         for value in values {
             tag.push(TagItem::new(key, ItemValue::Text(value.clone())));
@@ -250,17 +254,20 @@ pub(crate) fn sample_audio_with_mbids(
     let mut tags = Vec::new();
     tag.dump_to(&mut tags, WriteOptions::new()).unwrap();
 
-    let block_align = (source.bit_depth() / 8 * source.channels()) as u16;
-    let byte_rate = source.bitrate() / 8;
-    let data_len = (u128::from(byte_rate) * source.duration_ms() / 1000) as usize;
+    let block_align =
+        (source.audio().bit_depth().unwrap_or_default() / 8 * source.audio().channels()) as u16;
+    let byte_rate = source.audio().bitrate().unwrap_or_default() / 8;
+    let data_len =
+        (u128::from(byte_rate) * source.audio().duration_ms().unwrap_or_default() / 1000) as usize;
 
     let mut format = Vec::new();
     format.extend_from_slice(&1_u16.to_le_bytes());
-    format.extend_from_slice(&(source.channels() as u16).to_le_bytes());
-    format.extend_from_slice(&source.sample_rate().to_le_bytes());
+    format.extend_from_slice(&(source.audio().channels() as u16).to_le_bytes());
+    format.extend_from_slice(&source.audio().sample_rate().to_le_bytes());
     format.extend_from_slice(&u32::try_from(byte_rate).unwrap().to_le_bytes());
     format.extend_from_slice(&block_align.to_le_bytes());
-    format.extend_from_slice(&(source.bit_depth() as u16).to_le_bytes());
+    format
+        .extend_from_slice(&(source.audio().bit_depth().unwrap_or_default() as u16).to_le_bytes());
 
     let mut bytes = b"RIFF\0\0\0\0WAVE".to_vec();
 

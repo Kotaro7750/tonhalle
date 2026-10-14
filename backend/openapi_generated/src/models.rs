@@ -430,20 +430,20 @@ pub struct AudioFile {
     #[validate(range(min = 1u32))]
     pub sample_rate: u32,
 
-    /// ビット深度（bit）
+    /// ビット深度（bit）。取得できない形式ではnull
     #[serde(rename = "bitDepth")]
     #[validate(range(min = 1u32))]
-    pub bit_depth: u32,
+    pub bit_depth: Nullable<u32>,
 
     /// チャンネル数
     #[serde(rename = "channels")]
     #[validate(range(min = 1u32))]
     pub channels: u32,
 
-    /// ビットレート（bit/s）
+    /// ビットレート（bit/s）。取得できない場合はnull
     #[serde(rename = "bitrate")]
     #[validate(range(min = 1u32))]
-    pub bitrate: u32,
+    pub bitrate: Nullable<u32>,
 }
 
 lazy_static::lazy_static! {
@@ -457,9 +457,9 @@ impl AudioFile {
         media_type: String,
         playback_url: String,
         sample_rate: u32,
-        bit_depth: u32,
+        bit_depth: Nullable<u32>,
         channels: u32,
-        bitrate: u32,
+        bitrate: Nullable<u32>,
     ) -> AudioFile {
         AudioFile {
             id,
@@ -488,11 +488,19 @@ impl std::fmt::Display for AudioFile {
             Some("sampleRate".to_string()),
             Some(self.sample_rate.to_string()),
             Some("bitDepth".to_string()),
-            Some(self.bit_depth.to_string()),
+            Some(
+                self.bit_depth
+                    .as_ref()
+                    .map_or("null".to_string(), |x| x.to_string()),
+            ),
             Some("channels".to_string()),
             Some(self.channels.to_string()),
             Some("bitrate".to_string()),
-            Some(self.bitrate.to_string()),
+            Some(
+                self.bitrate
+                    .as_ref()
+                    .map_or("null".to_string(), |x| x.to_string()),
+            ),
         ];
 
         write!(
@@ -558,18 +566,22 @@ impl std::str::FromStr for AudioFile {
                     "sampleRate" => intermediate_rep.sample_rate.push(
                         <u32 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?,
                     ),
-                    #[allow(clippy::redundant_clone)]
-                    "bitDepth" => intermediate_rep.bit_depth.push(
-                        <u32 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?,
-                    ),
+                    "bitDepth" => {
+                        return std::result::Result::Err(
+                            "Parsing a nullable type in this style is not supported in AudioFile"
+                                .to_string(),
+                        );
+                    }
                     #[allow(clippy::redundant_clone)]
                     "channels" => intermediate_rep.channels.push(
                         <u32 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?,
                     ),
-                    #[allow(clippy::redundant_clone)]
-                    "bitrate" => intermediate_rep.bitrate.push(
-                        <u32 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?,
-                    ),
+                    "bitrate" => {
+                        return std::result::Result::Err(
+                            "Parsing a nullable type in this style is not supported in AudioFile"
+                                .to_string(),
+                        );
+                    }
                     _ => {
                         return std::result::Result::Err(
                             "Unexpected key while parsing AudioFile".to_string(),
@@ -604,21 +616,17 @@ impl std::str::FromStr for AudioFile {
                 .into_iter()
                 .next()
                 .ok_or_else(|| "sampleRate missing in AudioFile".to_string())?,
-            bit_depth: intermediate_rep
-                .bit_depth
-                .into_iter()
-                .next()
-                .ok_or_else(|| "bitDepth missing in AudioFile".to_string())?,
+            bit_depth: std::result::Result::Err(
+                "Nullable types not supported in AudioFile".to_string(),
+            )?,
             channels: intermediate_rep
                 .channels
                 .into_iter()
                 .next()
                 .ok_or_else(|| "channels missing in AudioFile".to_string())?,
-            bitrate: intermediate_rep
-                .bitrate
-                .into_iter()
-                .next()
-                .ok_or_else(|| "bitrate missing in AudioFile".to_string())?,
+            bitrate: std::result::Result::Err(
+                "Nullable types not supported in AudioFile".to_string(),
+            )?,
         })
     }
 }
@@ -2437,10 +2445,10 @@ pub struct Track {
     #[validate(range(min = 1u32))]
     pub track_number: u32,
 
-    /// トラックの再生時間（ミリ秒）
+    /// トラックの再生時間（ミリ秒）。取得できない場合はnull
     #[serde(rename = "durationMs")]
     #[validate(range(min = 0u32))]
-    pub duration_ms: u32,
+    pub duration_ms: Nullable<u32>,
 
     /// 表示順に並べたアーティストクレジット
     #[serde(rename = "artistCredits")]
@@ -2467,7 +2475,7 @@ impl Track {
         title: String,
         disc_number: u32,
         track_number: u32,
-        duration_ms: u32,
+        duration_ms: Nullable<u32>,
         artist_credits: Vec<models::ArtistCredit>,
         original_audio_file: models::AudioFile,
     ) -> Track {
@@ -2501,7 +2509,11 @@ impl std::fmt::Display for Track {
             Some("trackNumber".to_string()),
             Some(self.track_number.to_string()),
             Some("durationMs".to_string()),
-            Some(self.duration_ms.to_string()),
+            Some(
+                self.duration_ms
+                    .as_ref()
+                    .map_or("null".to_string(), |x| x.to_string()),
+            ),
             // Skipping artistCredits in query parameter serialization
 
             // Skipping originalAudioFile in query parameter serialization
@@ -2575,10 +2587,12 @@ impl std::str::FromStr for Track {
                     "trackNumber" => intermediate_rep.track_number.push(
                         <u32 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?,
                     ),
-                    #[allow(clippy::redundant_clone)]
-                    "durationMs" => intermediate_rep.duration_ms.push(
-                        <u32 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?,
-                    ),
+                    "durationMs" => {
+                        return std::result::Result::Err(
+                            "Parsing a nullable type in this style is not supported in Track"
+                                .to_string(),
+                        );
+                    }
                     "artistCredits" => {
                         return std::result::Result::Err(
                             "Parsing a container in this style is not supported in Track"
@@ -2629,11 +2643,9 @@ impl std::str::FromStr for Track {
                 .into_iter()
                 .next()
                 .ok_or_else(|| "trackNumber missing in Track".to_string())?,
-            duration_ms: intermediate_rep
-                .duration_ms
-                .into_iter()
-                .next()
-                .ok_or_else(|| "durationMs missing in Track".to_string())?,
+            duration_ms: std::result::Result::Err(
+                "Nullable types not supported in Track".to_string(),
+            )?,
             artist_credits: intermediate_rep
                 .artist_credits
                 .into_iter()
@@ -2688,7 +2700,7 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<Track> {
     }
 }
 
-/// トラックの再生時間（ミリ秒）
+/// トラックの再生時間（ミリ秒）。取得できない場合はnull
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct TrackDurationMs {}
@@ -3006,10 +3018,10 @@ pub struct TrackSummary {
     #[validate(range(min = 1u32))]
     pub track_number: u32,
 
-    /// トラックの再生時間（ミリ秒）
+    /// トラックの再生時間（ミリ秒）。取得できない場合はnull
     #[serde(rename = "durationMs")]
     #[validate(range(min = 0u32))]
-    pub duration_ms: u32,
+    pub duration_ms: Nullable<u32>,
 
     /// 表示順に並べたアーティストクレジット
     #[serde(rename = "artistCredits")]
@@ -3032,7 +3044,7 @@ impl TrackSummary {
         title: String,
         disc_number: u32,
         track_number: u32,
-        duration_ms: u32,
+        duration_ms: Nullable<u32>,
         artist_credits: Vec<models::ArtistCredit>,
     ) -> TrackSummary {
         TrackSummary {
@@ -3064,7 +3076,11 @@ impl std::fmt::Display for TrackSummary {
             Some("trackNumber".to_string()),
             Some(self.track_number.to_string()),
             Some("durationMs".to_string()),
-            Some(self.duration_ms.to_string()),
+            Some(
+                self.duration_ms
+                    .as_ref()
+                    .map_or("null".to_string(), |x| x.to_string()),
+            ),
             // Skipping artistCredits in query parameter serialization
         ];
 
@@ -3135,9 +3151,9 @@ impl std::str::FromStr for TrackSummary {
                     "trackNumber" => intermediate_rep.track_number.push(
                         <u32 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?,
                     ),
-                    #[allow(clippy::redundant_clone)]
-                    "durationMs" => intermediate_rep.duration_ms.push(
-                        <u32 as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?,
+                    "durationMs" => return std::result::Result::Err(
+                        "Parsing a nullable type in this style is not supported in TrackSummary"
+                            .to_string(),
                     ),
                     "artistCredits" => {
                         return std::result::Result::Err(
@@ -3184,11 +3200,9 @@ impl std::str::FromStr for TrackSummary {
                 .into_iter()
                 .next()
                 .ok_or_else(|| "trackNumber missing in TrackSummary".to_string())?,
-            duration_ms: intermediate_rep
-                .duration_ms
-                .into_iter()
-                .next()
-                .ok_or_else(|| "durationMs missing in TrackSummary".to_string())?,
+            duration_ms: std::result::Result::Err(
+                "Nullable types not supported in TrackSummary".to_string(),
+            )?,
             artist_credits: intermediate_rep
                 .artist_credits
                 .into_iter()

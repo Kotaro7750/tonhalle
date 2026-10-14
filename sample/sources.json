@@ -11,7 +11,7 @@
     "bits_per_sample": 16,
     "channels": 1,
     "trimmed": false,
-    "note": "Full source recordings downmixed and resampled for repository size. Ogg sources are already lossy; PCM WAV conversion does not restore lost information.",
+    "note": "Full source recordings downmixed and resampled for repository size. Ogg sources are already lossy; PCM WAV conversion does not restore lost information. This describes the initial WAV conversion; per-track conversion records describe subsequent format conversions.",
     "ffmpeg_version": "7.1",
     "arguments": [
       "-map_metadata",
@@ -60,7 +60,14 @@
           "track_id": "track-f2115a5abdab584f5c22d4e6053faf75b3bad0dc75b84ec13827ca9943ddcdc4",
           "path": "release-ea57599b1f0c33d1d943ff20226ad7d418d79a1436217827aa09812607eaad64/925eda40-54cb-4af4-9579-6811fc7477ac.wav",
           "size_bytes": 2436298,
-          "sha256": "bed6f1e976e887187e3c8e50bb04404d8a408aff514ae6998973fa73c32bea8f"
+          "sha256": "bed6f1e976e887187e3c8e50bb04404d8a408aff514ae6998973fa73c32bea8f",
+          "audio_properties": {
+            "bit_depth": 16,
+            "bitrate": 352800,
+            "channels": 1,
+            "media_type": "audio/wav",
+            "sample_rate": 22050
+          }
         },
         {
           "audio_file_id": "86493bdf-ed7d-494a-9282-d941b605bff6",
@@ -85,9 +92,144 @@
           },
           "duration_ms": 59960,
           "track_id": "track-7ffc49de9921bb0c1ea61ef8364865fce233a9dc84a029a369ac9561dd5d8270",
-          "path": "release-ea57599b1f0c33d1d943ff20226ad7d418d79a1436217827aa09812607eaad64/86493bdf-ed7d-494a-9282-d941b605bff6.wav",
-          "size_bytes": 2646214,
-          "sha256": "a34152531af2c6e90123486895276f92db068580c3e94e025ab406f71c6c7bdf"
+          "path": "release-ea57599b1f0c33d1d943ff20226ad7d418d79a1436217827aa09812607eaad64/86493bdf-ed7d-494a-9282-d941b605bff6.flac",
+          "size_bytes": 881234,
+          "sha256": "0f1ce1670b4cacbac759a5f9fd9bb8e75cd216c979bfdd9f940ea52ff52948df",
+          "audio_properties": {
+            "bit_depth": 16,
+            "bitrate": 116000,
+            "channels": 1,
+            "media_type": "audio/flac",
+            "sample_rate": 22050
+          },
+          "conversion": {
+            "arguments": [
+              "-map_metadata",
+              "-1",
+              "-ac",
+              "1",
+              "-ar",
+              "22050",
+              "-c:a",
+              "flac",
+              "-compression_level",
+              "8"
+            ],
+            "codec": "flac",
+            "ffmpeg_version": "7.1",
+            "input_path": "release-ea57599b1f0c33d1d943ff20226ad7d418d79a1436217827aa09812607eaad64/86493bdf-ed7d-494a-9282-d941b605bff6.wav",
+            "input_sha256": "a34152531af2c6e90123486895276f92db068580c3e94e025ab406f71c6c7bdf",
+            "metadata_format": "Vorbis Comments",
+            "trimmed": false
+          }
+        },
+        {
+          "audio_file_id": "81c6e8a1-6db3-4e7d-ab5e-1d7122016346",
+          "title": "Prelude No. 15 in G major, BWV 860",
+          "disc_number": 1,
+          "track_number": 3,
+          "artists": [
+            "Kimiko Ishizaka"
+          ],
+          "source": {
+            "file_page": "https://commons.wikimedia.org/wiki/File:Kimiko_Ishizaka_-_Bach_-_Well-Tempered_Clavier,_Book_1_-_29_Prelude_No._15_in_G_major,_BWV_860.ogg",
+            "file_page_revision": "https://commons.wikimedia.org/w/index.php?title=File%3AKimiko+Ishizaka+-+Bach+-+Well-Tempered+Clavier%2C+Book+1+-+29+Prelude+No.+15+in+G+major%2C+BWV+860.ogg&oldid=642970990",
+            "download_url": "https://upload.wikimedia.org/wikipedia/commons/8/81/Kimiko_Ishizaka_-_Bach_-_Well-Tempered_Clavier%2C_Book_1_-_29_Prelude_No._15_in_G_major%2C_BWV_860.ogg",
+            "size_bytes": 1253487,
+            "sha1": "3703869d89f4cb70b40f72d6eb72a81ce4b66a08",
+            "sha256": "11c98a22f749c9d406d5dabd6cbf665b254e6830177f4a5e59ced3ded617971a",
+            "composer": "Johann Sebastian Bach",
+            "rights_status": "CC0-1.0",
+            "rights_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+            "rights_basis": "The file page explicitly identifies Kimiko Ishizaka as the performer and dedicates this recording under CC0-1.0. Composition by Johann Sebastian Bach (died 1750).",
+            "provider": "Open Well-Tempered Clavier (https://welltemperedclavier.org/) via Wikimedia Commons"
+          },
+          "duration_ms": 57257,
+          "track_id": "track-7958191d5e5d1107c0b78b465fa0658a9ef7ffeec8016233ffd1293af4dc34c6",
+          "path": "release-ea57599b1f0c33d1d943ff20226ad7d418d79a1436217827aa09812607eaad64/81c6e8a1-6db3-4e7d-ab5e-1d7122016346.aac",
+          "size_bytes": 453267,
+          "sha256": "940ca4f8127c412a821732924d814929c1664385f9b327261033add006869569",
+          "audio_properties": {
+            "bit_depth": null,
+            "bitrate": 63000,
+            "channels": 1,
+            "media_type": "audio/aac",
+            "sample_rate": 22050
+          },
+          "conversion": {
+            "arguments": [
+              "-map_metadata",
+              "-1",
+              "-ac",
+              "1",
+              "-ar",
+              "22050",
+              "-c:a",
+              "aac",
+              "-b:a",
+              "64k"
+            ],
+            "codec": "aac",
+            "ffmpeg_version": "7.1",
+            "input_path": "release-ea57599b1f0c33d1d943ff20226ad7d418d79a1436217827aa09812607eaad64/925eda40-54cb-4af4-9579-6811fc7477ac.wav",
+            "input_sha256": "bed6f1e976e887187e3c8e50bb04404d8a408aff514ae6998973fa73c32bea8f",
+            "metadata_format": "ID3v2.4",
+            "trimmed": false
+          }
+        },
+        {
+          "audio_file_id": "96b9322f-a6e2-41c4-8924-e6279e161a93",
+          "title": "Prelude No. 15 in G major, BWV 860",
+          "disc_number": 1,
+          "track_number": 4,
+          "artists": [
+            "Kimiko Ishizaka"
+          ],
+          "source": {
+            "file_page": "https://commons.wikimedia.org/wiki/File:Kimiko_Ishizaka_-_Bach_-_Well-Tempered_Clavier,_Book_1_-_29_Prelude_No._15_in_G_major,_BWV_860.ogg",
+            "file_page_revision": "https://commons.wikimedia.org/w/index.php?title=File%3AKimiko+Ishizaka+-+Bach+-+Well-Tempered+Clavier%2C+Book+1+-+29+Prelude+No.+15+in+G+major%2C+BWV+860.ogg&oldid=642970990",
+            "download_url": "https://upload.wikimedia.org/wikipedia/commons/8/81/Kimiko_Ishizaka_-_Bach_-_Well-Tempered_Clavier%2C_Book_1_-_29_Prelude_No._15_in_G_major%2C_BWV_860.ogg",
+            "size_bytes": 1253487,
+            "sha1": "3703869d89f4cb70b40f72d6eb72a81ce4b66a08",
+            "sha256": "11c98a22f749c9d406d5dabd6cbf665b254e6830177f4a5e59ced3ded617971a",
+            "composer": "Johann Sebastian Bach",
+            "rights_status": "CC0-1.0",
+            "rights_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+            "rights_basis": "The file page explicitly identifies Kimiko Ishizaka as the performer and dedicates this recording under CC0-1.0. Composition by Johann Sebastian Bach (died 1750).",
+            "provider": "Open Well-Tempered Clavier (https://welltemperedclavier.org/) via Wikimedia Commons"
+          },
+          "duration_ms": 55246,
+          "track_id": "track-d767621d3e0aa3012f4373d920fabfe1323feba2913c06bd372da07699276c0d",
+          "path": "release-ea57599b1f0c33d1d943ff20226ad7d418d79a1436217827aa09812607eaad64/96b9322f-a6e2-41c4-8924-e6279e161a93.m4a",
+          "size_bytes": 450236,
+          "sha256": "8c0b2d744d991eef71774c6c2eb4a64b1df51bbecd7797f6e4722fb906df8c4d",
+          "audio_properties": {
+            "bit_depth": null,
+            "bitrate": 64000,
+            "channels": 1,
+            "media_type": "audio/mp4",
+            "sample_rate": 22050
+          },
+          "conversion": {
+            "arguments": [
+              "-map_metadata",
+              "-1",
+              "-ac",
+              "1",
+              "-ar",
+              "22050",
+              "-c:a",
+              "aac",
+              "-b:a",
+              "64k"
+            ],
+            "codec": "aac",
+            "ffmpeg_version": "7.1",
+            "input_path": "release-ea57599b1f0c33d1d943ff20226ad7d418d79a1436217827aa09812607eaad64/925eda40-54cb-4af4-9579-6811fc7477ac.wav",
+            "input_sha256": "bed6f1e976e887187e3c8e50bb04404d8a408aff514ae6998973fa73c32bea8f",
+            "metadata_format": "iTunes ilst",
+            "trimmed": false
+          }
         }
       ],
       "release_id": "release-ea57599b1f0c33d1d943ff20226ad7d418d79a1436217827aa09812607eaad64"
@@ -123,9 +265,36 @@
           },
           "duration_ms": 64013,
           "track_id": "track-62c533d6746f89a5eb6e3582c1371f1a47db7208a3a5859eae37abef31203556",
-          "path": "release-21fb4363f6c25b9a69da619ace8e12bcb27c9b1047a68de87a3433ed43321ac2/b6a68368-548d-49d9-bbdb-cb1e0ee6138a.wav",
-          "size_bytes": 2824968,
-          "sha256": "0245eaa3e1626e77ac4ff432a69a527d806c81b6ccd9e5c8682724e350a1014c"
+          "path": "release-21fb4363f6c25b9a69da619ace8e12bcb27c9b1047a68de87a3433ed43321ac2/b6a68368-548d-49d9-bbdb-cb1e0ee6138a.ogg",
+          "size_bytes": 287094,
+          "sha256": "5b8d30eb269ff87599d3f5f4e16fb3ce4cdd395d6a579a0b1ba7f81d9a8c4b7f",
+          "audio_properties": {
+            "bit_depth": null,
+            "bitrate": 40000,
+            "channels": 1,
+            "media_type": "audio/ogg",
+            "sample_rate": 22050
+          },
+          "conversion": {
+            "arguments": [
+              "-map_metadata",
+              "-1",
+              "-ac",
+              "1",
+              "-ar",
+              "22050",
+              "-c:a",
+              "libvorbis",
+              "-q:a",
+              "3"
+            ],
+            "codec": "libvorbis",
+            "ffmpeg_version": "7.1",
+            "input_path": "release-21fb4363f6c25b9a69da619ace8e12bcb27c9b1047a68de87a3433ed43321ac2/b6a68368-548d-49d9-bbdb-cb1e0ee6138a.wav",
+            "input_sha256": "0245eaa3e1626e77ac4ff432a69a527d806c81b6ccd9e5c8682724e350a1014c",
+            "metadata_format": "Vorbis Comments",
+            "trimmed": false
+          }
         }
       ],
       "release_id": "release-21fb4363f6c25b9a69da619ace8e12bcb27c9b1047a68de87a3433ed43321ac2"
@@ -143,7 +312,7 @@
         {
           "track_id": "track-43cb6e500678cd2918d1ae445ee83e564c7729e7a12c0e47ee1ca20f9effeb31",
           "audio_file_id": "f8c2a61f-a7ec-4fdb-b154-44f38aa0d7c7",
-          "path": "release-1ac1508956628bfc1927b6fde571efbd604820dbacdeb82ca5d5d58eafe76be7/f8c2a61f-a7ec-4fdb-b154-44f38aa0d7c7.wav",
+          "path": "release-1ac1508956628bfc1927b6fde571efbd604820dbacdeb82ca5d5d58eafe76be7/f8c2a61f-a7ec-4fdb-b154-44f38aa0d7c7.mp3",
           "title": "Caprice 'Yankee Doodle'",
           "disc_number": 1,
           "track_number": 1,
@@ -151,9 +320,9 @@
             "Elias Breeskin",
             "Rudolph Gruen"
           ],
-          "duration_ms": 184469,
-          "size_bytes": 8137150,
-          "sha256": "eca6b59f80a8a1f5ba90186bdc9056a89e6eb0403efd16e97c71ef09e9cc2666",
+          "duration_ms": 184529,
+          "size_bytes": 1479913,
+          "sha256": "cb84f50d4d3a2b53785b6e718d95b684cea2205f8eddee80d3d3811fd8c4eebd",
           "source": {
             "file_page": "https://commons.wikimedia.org/wiki/File:CC0-CH_-_Elias_Breeskin_and_Rudolph_Gruen_-_Caprice_-_Yankee_Doodle_-_Brunswick-13012b-3651.flac",
             "file_page_revision": "https://commons.wikimedia.org/w/index.php?title=File%3ACC0-CH+-+Elias+Breeskin+and+Rudolph+Gruen+-+Caprice+-+Yankee+Doodle+-+Brunswick-13012b-3651.flac&oldid=1127397426",
@@ -167,9 +336,37 @@
             "rights_basis": "The CC-ZERO-PROJECT file page marks the recording public domain, not CC0. Recorded and first released in New York in February 1920; pre-1923 recordings are public domain in the US from 2022. Composition by Vieuxtemps (died 1881); no arranger is listed.",
             "original_release_date": "1920-02",
             "us_recording_term_reference": "https://www.copyright.gov/music-modernization/pre1972-soundrecordings/"
+          },
+          "audio_properties": {
+            "bit_depth": null,
+            "bitrate": 64000,
+            "channels": 1,
+            "media_type": "audio/mpeg",
+            "sample_rate": 22050
+          },
+          "conversion": {
+            "arguments": [
+              "-map_metadata",
+              "-1",
+              "-ac",
+              "1",
+              "-ar",
+              "22050",
+              "-c:a",
+              "libmp3lame",
+              "-b:a",
+              "64k"
+            ],
+            "codec": "libmp3lame",
+            "ffmpeg_version": "7.1",
+            "input_path": "release-1ac1508956628bfc1927b6fde571efbd604820dbacdeb82ca5d5d58eafe76be7/f8c2a61f-a7ec-4fdb-b154-44f38aa0d7c7.wav",
+            "input_sha256": "eca6b59f80a8a1f5ba90186bdc9056a89e6eb0403efd16e97c71ef09e9cc2666",
+            "metadata_format": "ID3v2.4",
+            "trimmed": false
           }
         }
       ]
     }
-  ]
+  ],
+  "format_conversion_date": "2026-10-14"
 }

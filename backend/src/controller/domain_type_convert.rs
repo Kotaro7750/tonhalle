@@ -53,7 +53,9 @@ impl From<&Track> for models::TrackSummary {
             title: value.title().to_owned(),
             disc_number: value.disc_number(),
             track_number: value.track_number(),
-            duration_ms: value.duration_ms(),
+            duration_ms: value
+                .duration_ms()
+                .map_or(Nullable::Null, Nullable::Present),
             artist_credits: value.artist_credits().iter().map(Into::into).collect(),
         }
     }
@@ -68,7 +70,9 @@ impl From<Track> for models::Track {
             title: value.title().to_owned(),
             disc_number: value.disc_number(),
             track_number: value.track_number(),
-            duration_ms: value.duration_ms(),
+            duration_ms: value
+                .duration_ms()
+                .map_or(Nullable::Null, Nullable::Present),
             artist_credits: value.artist_credits().iter().map(Into::into).collect(),
             original_audio_file: value.original_audio_file().into(),
         }
@@ -76,16 +80,16 @@ impl From<Track> for models::Track {
 }
 
 impl From<&AudioFile> for models::AudioFile {
-    /// Builds WAV playback metadata with the retained storage UUID.
+    /// Builds audio playback metadata with the retained storage UUID.
     fn from(value: &AudioFile) -> Self {
         Self {
             id: value.id().to_string(),
-            media_type: "audio/wav".into(),
+            media_type: value.media_type().into(),
             playback_url: value.playback_url().as_str().to_owned(),
             sample_rate: value.sample_rate(),
-            bit_depth: value.bit_depth(),
+            bit_depth: value.bit_depth().map_or(Nullable::Null, Nullable::Present),
             channels: value.channels(),
-            bitrate: value.bitrate(),
+            bitrate: value.bitrate().map_or(Nullable::Null, Nullable::Present),
         }
     }
 }

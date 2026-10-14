@@ -49,8 +49,8 @@ pub(crate) fn ingest_track(
     let metadata = ReleaseMetadata::new(
         raw.release_title(),
         raw.release_date(),
-        raw.release_artist_names(),
-        raw.release_artist_mbids(),
+        raw.release_credit().names(),
+        raw.release_credit().mbids(),
     )?;
 
     if metadata.id() != release_id {
@@ -63,10 +63,11 @@ pub(crate) fn ingest_track(
         audio_file_id,
         object_key,
         playback_url,
-        raw.sample_rate(),
-        raw.bit_depth(),
-        raw.channels(),
-        raw.bitrate(),
+        raw.audio().media_type(),
+        raw.audio().sample_rate(),
+        raw.audio().bit_depth(),
+        raw.audio().channels(),
+        raw.audio().bitrate(),
     )?;
 
     let track = Track::new(
@@ -74,9 +75,9 @@ pub(crate) fn ingest_track(
         raw.track_title(),
         raw.disc_number(),
         raw.track_number(),
-        raw.duration_ms(),
-        raw.track_artist_names(),
-        raw.track_artist_mbids(),
+        raw.audio().duration_ms(),
+        raw.track_credit().names(),
+        raw.track_credit().mbids(),
         audio_file,
     )?;
 
@@ -103,7 +104,7 @@ mod tests {
         let release_id = release_metadata(&source).unwrap().id().clone();
 
         let mut variants = Vec::new();
-        for field in 0..10 {
+        for field in 0..9 {
             let mut invalid = MetadataFixture::from(&source);
 
             match field {
@@ -114,9 +115,8 @@ mod tests {
                 4 => invalid.track_artists.names.clear(),
                 5 => invalid.track_number = "0".into(),
                 6 => invalid.audio_file.sample_rate = 0,
-                7 => invalid.audio_file.bit_depth = 0,
+                7 => invalid.audio_file.bit_depth = Some(0),
                 8 => invalid.audio_file.channels = 0,
-                9 => invalid.audio_file.bitrate = 0,
                 _ => unreachable!(),
             }
 
