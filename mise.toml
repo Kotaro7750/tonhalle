@@ -3,6 +3,11 @@
 "java" = { version = "openjdk" } # This is for openapi-generator-cli, which requires Java to run.
 "npm:@openapitools/openapi-generator-cli" = { version = "latest", npm_args = "--ignore-scripts=false"}
 
+[tasks."sample:serve"]
+description = "Serve sample audio with HTTP Range support"
+dir = "."
+run = "npx --yes http-server@14.1.1 ./sample -p 8000 -c-1"
+
 [tasks."skills:update"]
 description = "Update Chakra UI skills for Codex"
 dir = "."

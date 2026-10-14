@@ -1,0 +1,40 @@
+{
+  "name": "tonhalle-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
+    "preview": "vite preview",
+    "api:generate": "openapi-generator-cli generate -i ../contracts/api/openapi.yaml -g typescript-fetch -o src/api/generated --additional-properties=hideGenerationTimestamp=true,enumUnknownDefaultCase=false",
+    "test": "playwright test",
+    "theme:typegen": "chakra typegen src/theme.ts"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@chakra-ui/react": "^3.37.0",
+    "@emotion/react": "^11.14.0",
+    "@tanstack/react-query": "^5.104.2",
+    "lucide-react": "^1.56.0",
+    "next-themes": "^0.4.6",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router-dom": "^7.18.4",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@chakra-ui/cli": "^3.37.0",
+    "@openapitools/openapi-generator-cli": "^2.41.0",
+    "@playwright/test": "^1.64.0",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}

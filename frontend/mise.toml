@@ -1,0 +1,18 @@
+[tools]
+node = "24"
+
+[tasks.dev]
+dir = "."
+run = "npm run dev"
+
+[tasks.build]
+dir = "."
+run = "npm run build"
+
+[tasks.test]
+dir = "."
+run = "npm test"
+
+[tasks."openapi:generate"]
+dir = "."
+run = "npm run api:generate"
