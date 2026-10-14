@@ -1,5 +1,5 @@
 import { Box, Container, HStack, Link, SkipNavContent, SkipNavLink, Text } from '@chakra-ui/react'
-import { ArrowLeft, AudioLines } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { Route, Routes, Link as RouterLink, matchPath, useLocation, useNavigate, type Location } from 'react-router-dom'
 import { useEffect, useRef } from 'react'
 import { ReleasesPage } from './pages/ReleasesPage'
@@ -7,6 +7,7 @@ import { ReleasePage } from './pages/ReleasePage'
 import { MiniPlayer } from './player/MiniPlayer'
 import { PlayerOverlay } from './player/PlayerOverlay'
 import { ColorModeSwitch } from './components/ui/color-mode-switch'
+import { Brand } from './components/Brand'
 
 export function App() {
   const location = useLocation()
@@ -29,7 +30,7 @@ export function App() {
       <Box as="header" borderBottomWidth="1" bg="bg.panel">
         <Container maxW="6xl" px={{ base: '5', md: '8' }} py="5">
           <HStack justify="space-between">
-            <Link asChild color="fg" textDecoration="none"><RouterLink to="/"><AudioLines size={25} /><Text fontFamily="heading" fontSize="2xl" fontWeight="bold" letterSpacing="tight">tonhalle</Text></RouterLink></Link>
+            <Link asChild color="fg" textDecoration="none"><RouterLink to="/"><Brand /></RouterLink></Link>
             <ColorModeSwitch />
           </HStack>
         </Container>

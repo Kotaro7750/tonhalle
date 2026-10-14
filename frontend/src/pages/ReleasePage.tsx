@@ -2,11 +2,17 @@ import { Badge, Box, HStack, Heading, IconButton, Link, Stack, Text } from '@cha
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Disc3, Play } from 'lucide-react'
 import { Link as RouterLink, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { releaseOptions } from '../api/queries'
+import { releaseOptions, trackOptions } from '../api/queries'
+import { AudioFormatBadge } from '../components/AudioFormatBadge'
 import { ErrorNotice, Loading } from '../components/Feedback'
 import { PageHeading } from '../components/PageHeading'
 import { RecordArt } from '../components/RecordArt'
 import { artistName, formatTime } from '../format'
+
+function TrackFormatBadge({ trackId }: { trackId: string }) {
+  const { data } = useQuery(trackOptions(trackId))
+  return data ? <AudioFormatBadge mediaType={data.originalAudioFile.mediaType} /> : null
+}
 
 export function ReleasePage() {
   const { releaseId = '' } = useParams()
@@ -38,7 +44,10 @@ export function ReleasePage() {
             <HStack key={track.id} gap={{ base: '3', md: '5' }} px="3" py="5" borderBottomWidth="1">
               <Text color="fg.muted" width="8" flexShrink="0" textAlign="center">{track.trackNumber}</Text>
               <Stack flex="1" minW="0" gap="1"><Text fontWeight="medium" overflowWrap="anywhere">{track.title}</Text><Text color="fg.muted" textStyle="sm" overflowWrap="anywhere">{artistName(track.artistCredits)}</Text></Stack>
-              <Text textStyle="sm" color="fg.muted" fontVariantNumeric="tabular-nums">{track.durationMs === null ? '—' : formatTime(track.durationMs / 1000)}</Text>
+              <HStack gap={{ base: '2', md: '5' }} flexShrink="0">
+                <TrackFormatBadge trackId={track.id} />
+                <Text textStyle="sm" color="fg.muted" fontVariantNumeric="tabular-nums">{track.durationMs === null ? '—' : formatTime(track.durationMs / 1000)}</Text>
+              </HStack>
               <IconButton aria-label={`Play ${track.title}`} variant="ghost" rounded="full" onClick={() => navigate(`/tracks/${track.id}`, { state: { autoPlay: true, backgroundLocation: location } })}>
                 <Play size={18} />
               </IconButton>

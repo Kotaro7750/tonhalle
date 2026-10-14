@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-labelledby="title desc">
+<title id="title">Tonhalle</title>
+<desc id="desc">Tonhalle sound-wave icon.</desc>
+<g fill="#0D9488" transform="translate(2 15.684) scale(0.064)">
+<path d="M285 0a45 45 0 0 0 0 90h135v450a48 48 0 0 0 96 0V90h135a45 45 0 0 0 0-90H285Z"/>
+<rect x="12" y="268" width="68" height="168" rx="34"/>
+<rect x="120" y="107" width="82" height="443" rx="41"/>
+<rect x="264" y="217" width="84" height="290" rx="42"/>
+<rect x="582" y="211" width="84" height="296" rx="42"/>
+<rect x="726" y="91" width="82" height="459" rx="41"/>
+<rect x="846" y="268" width="68" height="168" rx="34"/>
+</g>
+</svg>
