@@ -2,3 +2,13 @@
 "git-lfs" = "3.8.0"
 "java" = { version = "openjdk" } # This is for openapi-generator-cli, which requires Java to run.
 "npm:@openapitools/openapi-generator-cli" = { version = "latest", npm_args = "--ignore-scripts=false"}
+
+[tasks."skills:update"]
+description = "Update Chakra UI skills for Codex"
+dir = "."
+run = '''
+npx --yes skills@latest add https://github.com/chakra-ui/chakra-ui/tree/main/skills \
+  --agent codex \
+  --skill chakra-ui-builder chakra-ui-migrate chakra-ui-refactor \
+  --yes
+'''

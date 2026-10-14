@@ -1,0 +1,4 @@
+[mcp_servers.chakra-ui]
+command = "npx"
+args = ["-y", "@chakra-ui/react-mcp"]
+startup_timeout_sec = 60
