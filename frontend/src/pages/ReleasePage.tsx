@@ -1,12 +1,13 @@
 import { Badge, Box, HStack, Heading, IconButton, Link, Stack, Text } from '@chakra-ui/react'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Disc3, Play } from 'lucide-react'
-import { Link as RouterLink, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link as RouterLink, useParams } from 'react-router-dom'
 import { releaseOptions, trackOptions } from '../api/queries'
 import { AudioFormatBadge } from '../components/AudioFormatBadge'
 import { ErrorNotice, Loading } from '../components/Feedback'
 import { PageHeading } from '../components/PageHeading'
 import { RecordArt } from '../components/RecordArt'
+import { useAudioControls } from '../player/PlayerProvider'
 import { artistName, formatTime } from '../format'
 
 function TrackFormatBadge({ trackId }: { trackId: string }) {
@@ -14,10 +15,18 @@ function TrackFormatBadge({ trackId }: { trackId: string }) {
   return data ? <AudioFormatBadge mediaType={data.originalAudioFile.mediaType} /> : null
 }
 
+function TrackPlayButton({ trackId, title }: { trackId: string; title: string }) {
+  const { data, isPending } = useQuery(trackOptions(trackId))
+  const { playTrack } = useAudioControls()
+  return (
+    <IconButton aria-label={`Play ${title}`} variant="ghost" rounded="full" disabled={!data} loading={isPending} onClick={() => { if (data) playTrack(data) }}>
+      <Play size={18} />
+    </IconButton>
+  )
+}
+
 export function ReleasePage() {
   const { releaseId = '' } = useParams()
-  const navigate = useNavigate()
-  const location = useLocation()
   const query = useQuery(releaseOptions(releaseId))
   if (query.isPending) return <Loading />
   if (query.isError) return <ErrorNotice error={query.error} retry={() => void query.refetch()} />
@@ -48,9 +57,7 @@ export function ReleasePage() {
                 <TrackFormatBadge trackId={track.id} />
                 <Text textStyle="sm" color="fg.muted" fontVariantNumeric="tabular-nums">{track.durationMs === null ? '—' : formatTime(track.durationMs / 1000)}</Text>
               </HStack>
-              <IconButton aria-label={`Play ${track.title}`} variant="ghost" rounded="full" onClick={() => navigate(`/tracks/${track.id}`, { state: { autoPlay: true, backgroundLocation: location } })}>
-                <Play size={18} />
-              </IconButton>
+              <TrackPlayButton trackId={track.id} title={track.title} />
             </HStack>
           ))}
         </Stack>)}

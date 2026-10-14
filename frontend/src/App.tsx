@@ -19,7 +19,6 @@ export function App() {
   const main = useRef<HTMLDivElement>(null)
   useEffect(() => {
     window.scrollTo(0, 0)
-    document.title = 'Tonhalle — Music Library'
   }, [pagePathname])
   useEffect(() => {
     if (!playerOpen) main.current?.focus({ preventScroll: true })

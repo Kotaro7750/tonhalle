@@ -3,6 +3,7 @@ import type { Track } from '../api/generated'
 
 interface PlayerState {
   track: Track | null
+  repeat: boolean
   playing: boolean
   currentTime: number
   duration: number
@@ -13,7 +14,7 @@ interface PlayerState {
 }
 
 export const usePlayer = create<PlayerState>((set) => ({
-  track: null, playing: false, currentTime: 0, duration: 0, ready: false, error: null,
+  track: null, repeat: false, playing: false, currentTime: 0, duration: 0, ready: false, error: null,
   select: (track) => set((state) => state.track?.id === track.id ? state : {
     track, playing: false, currentTime: 0, duration: 0, ready: false, error: null,
   }),

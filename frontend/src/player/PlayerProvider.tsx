@@ -1,7 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode } from 'react'
+import type { Track } from '../api/generated'
+import { artistName } from '../format'
 import { usePlayer } from './store'
 
-const AudioContext = createContext<{ play: () => void; toggle: () => void; seek: (time: number) => void; reload: () => void } | null>(null)
+const AudioContext = createContext<{ play: () => void; playTrack: (track: Track) => void; toggle: () => void; seek: (time: number) => void; skip: (seconds: number) => void; reload: () => void } | null>(null)
 
 export function useAudioControls() {
   const controls = useContext(AudioContext)
@@ -11,12 +13,22 @@ export function useAudioControls() {
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const audio = useRef<HTMLAudioElement>(null)
+  const pendingPlay = useRef<string | null>(null)
   const track = usePlayer((state) => state.track)
+  const repeat = usePlayer((state) => state.repeat)
   const update = usePlayer((state) => state.update)
   useEffect(() => {
     const element = audio.current
     return () => { element?.pause() }
   }, [track?.id])
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || typeof MediaMetadata === 'undefined') return
+    navigator.mediaSession.metadata = track ? new MediaMetadata({
+      title: track.title,
+      artist: artistName(track.artistCredits),
+    }) : null
+    return () => { navigator.mediaSession.metadata = null }
+  }, [track])
   const syncTime = () => {
     if (!audio.current) return
     update({
@@ -39,6 +51,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       update({ playing: false, error: 'Could not play audio. Check the source and your connection, then try again.' })
     })
   }, [track, update])
+  const playTrack = (nextTrack: Track) => {
+    if (track?.id === nextTrack.id) {
+      play()
+      return
+    }
+    pendingPlay.current = nextTrack.id
+    usePlayer.getState().select(nextTrack)
+  }
+  useEffect(() => {
+    if (track && pendingPlay.current === track.id) {
+      pendingPlay.current = null
+      play()
+    }
+  }, [track, play])
   const toggle = () => {
     const element = audio.current
     if (!element || !track) return
@@ -51,19 +77,23 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     element.currentTime = Math.max(0, Math.min(time, element.duration))
     syncTime()
   }
+  const skip = (seconds: number) => {
+    if (audio.current) seek(audio.current.currentTime + seconds)
+  }
   const reload = () => {
     update({ error: null, playing: false, ready: false, currentTime: 0 })
     audio.current?.load()
   }
 
   return (
-    <AudioContext.Provider value={{ play, toggle, seek, reload }}>
+    <AudioContext.Provider value={{ play, playTrack, toggle, seek, skip, reload }}>
       {children}
       {track && <audio
         key={track.id}
         ref={audio}
         src={track.originalAudioFile.playbackUrl}
         preload="metadata"
+        loop={repeat}
         onLoadedMetadata={syncTime}
         onDurationChange={syncTime}
         onCanPlay={() => update({ ready: true, error: null })}
