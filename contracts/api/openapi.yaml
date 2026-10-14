@@ -1,7 +1,7 @@
 openapi: "3.1.0"
 info:
   title: "Tonhalle API"
-  version: "0.1.0"
+  version: "0.1.1"
   license:
     name: "MIT"
     identifier: "MIT"
@@ -237,9 +237,9 @@ components:
       minimum: 1
       description: "トラック番号"
     TrackDurationMs:
-      type: "integer"
+      type: ["integer", "null"]
       minimum: 0
-      description: "トラックの再生時間（ミリ秒）"
+      description: "トラックの再生時間（ミリ秒）。取得できない場合はnull"
     ArtistCredits:
       type: "array"
       minItems: 1
@@ -355,7 +355,7 @@ components:
           "$ref": "#/components/schemas/AudioFileId"
         mediaType:
           type: "string"
-          const: "audio/wav"
+          enum: ["audio/wav", "audio/flac", "audio/aac", "audio/mp4", "audio/ogg", "audio/mpeg"]
           description: "音源のContent-Type"
         playbackUrl:
           type: "string"
@@ -367,17 +367,17 @@ components:
           minimum: 1
           description: "サンプルレート（Hz）"
         bitDepth:
-          type: "integer"
+          type: ["integer", "null"]
           minimum: 1
-          description: "ビット深度（bit）"
+          description: "ビット深度（bit）。取得できない形式ではnull"
         channels:
           type: "integer"
           minimum: 1
           description: "チャンネル数"
         bitrate:
-          type: "integer"
+          type: ["integer", "null"]
           minimum: 1
-          description: "ビットレート（bit/s）"
+          description: "ビットレート（bit/s）。取得できない場合はnull"
       description: "オリジナル音源の情報。"
     Track:
       type: "object"
