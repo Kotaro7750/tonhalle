@@ -36,7 +36,7 @@ export function TrackPage() {
       <PageHeading title={track.title}><Text color="fg.muted" textStyle="lg">{artistName(track.artistCredits)}</Text></PageHeading>
       {selectedId === track.id && <PlayerControls />}
       <HStack wrap="wrap" justify="center" color="fg.muted" gap="3">
-        <Badge variant="outline">WAV</Badge><Text textStyle="xs">{audio.sampleRate / 1000} kHz · {audio.bitDepth} bit · {audio.channels} ch</Text>
+        <Badge variant="outline">{{ "audio/wav": "WAV", "audio/flac": "FLAC", "audio/aac": "AAC", "audio/mp4": "M4A", "audio/ogg": "OGG", "audio/mpeg": "MP3" }[audio.mediaType]}</Badge><Text textStyle="xs">{audio.sampleRate / 1000} kHz{audio.bitDepth !== null && ` · ${audio.bitDepth} bit`} · {audio.channels} ch</Text>
       </HStack>
     </Stack>
   )

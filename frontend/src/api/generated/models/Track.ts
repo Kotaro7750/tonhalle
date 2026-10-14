@@ -55,9 +55,9 @@ export interface Track {
      */
     trackNumber: number;
     /**
-     * トラックの再生時間（ミリ秒）
+     * トラックの再生時間（ミリ秒）。取得できない場合はnull
      */
-    durationMs: number;
+    durationMs: number | null;
     /**
      * 表示順に並べたアーティストクレジット
      */

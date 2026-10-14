@@ -16,6 +16,9 @@ export function ReleasePage() {
   if (query.isPending) return <Loading />
   if (query.isError) return <ErrorNotice error={query.error} retry={() => void query.refetch()} />
   const release = query.data
+  const totalDurationMs = release.tracks.every((track) => track.durationMs !== null)
+    ? release.tracks.reduce((total, track) => total + (track.durationMs ?? 0), 0)
+    : null
   const discs = [...new Set(release.tracks.map((track) => track.discNumber))]
   return (
     <Stack gap="10">
@@ -24,7 +27,7 @@ export function ReleasePage() {
         <Box width={{ base: '40', md: '64' }} flexShrink="0"><RecordArt /></Box>
         <PageHeading eyebrow="RELEASE" title={release.title}>
           <Text textStyle="lg" color="fg.muted">{artistName(release.artistCredits)}</Text>
-          <HStack color="fg.muted" gap="3"><Badge>{release.releaseDate}</Badge><Text textStyle="sm">{release.tracks.length} {release.tracks.length === 1 ? 'track' : 'tracks'} · {formatTime(release.tracks.reduce((total, track) => total + track.durationMs, 0) / 1000)}</Text></HStack>
+          <HStack color="fg.muted" gap="3"><Badge>{release.releaseDate}</Badge><Text textStyle="sm">{release.tracks.length} {release.tracks.length === 1 ? 'track' : 'tracks'}{totalDurationMs !== null && ` · ${formatTime(totalDurationMs / 1000)}`}</Text></HStack>
         </PageHeading>
       </Stack>
       <Stack gap="6">
@@ -35,7 +38,7 @@ export function ReleasePage() {
             <HStack key={track.id} gap={{ base: '3', md: '5' }} px="3" py="5" borderBottomWidth="1">
               <Text color="fg.muted" width="8" flexShrink="0" textAlign="center">{track.trackNumber}</Text>
               <Stack flex="1" minW="0" gap="1"><Text fontWeight="medium" overflowWrap="anywhere">{track.title}</Text><Text color="fg.muted" textStyle="sm" overflowWrap="anywhere">{artistName(track.artistCredits)}</Text></Stack>
-              <Text textStyle="sm" color="fg.muted" fontVariantNumeric="tabular-nums">{formatTime(track.durationMs / 1000)}</Text>
+              <Text textStyle="sm" color="fg.muted" fontVariantNumeric="tabular-nums">{track.durationMs === null ? '—' : formatTime(track.durationMs / 1000)}</Text>
               <IconButton aria-label={`Play ${track.title}`} variant="ghost" rounded="full" onClick={() => navigate(`/tracks/${track.id}`, { state: { autoPlay: true, backgroundLocation: location } })}>
                 <Play size={18} />
               </IconButton>

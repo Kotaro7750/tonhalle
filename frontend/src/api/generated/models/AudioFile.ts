@@ -37,17 +37,17 @@ export interface AudioFile {
      */
     sampleRate: number;
     /**
-     * ビット深度（bit）
+     * ビット深度（bit）。取得できない形式ではnull
      */
-    bitDepth: number;
+    bitDepth: number | null;
     /**
      * チャンネル数
      */
     channels: number;
     /**
-     * ビットレート（bit/s）
+     * ビットレート（bit/s）。取得できない場合はnull
      */
-    bitrate: number;
+    bitrate: number | null;
 }
 
 
@@ -56,6 +56,11 @@ export interface AudioFile {
  */
 export const AudioFileMediaTypeEnum = {
     AudioWav: 'audio/wav',
+    AudioFlac: 'audio/flac',
+    AudioAac: 'audio/aac',
+    AudioMp4: 'audio/mp4',
+    AudioOgg: 'audio/ogg',
+    AudioMpeg: 'audio/mpeg',
 } as const;
 export type AudioFileMediaTypeEnum = typeof AudioFileMediaTypeEnum[keyof typeof AudioFileMediaTypeEnum];
 
@@ -66,8 +71,6 @@ export type AudioFileMediaTypeEnum = typeof AudioFileMediaTypeEnum[keyof typeof 
 export function instanceOfAudioFile(value: object): value is AudioFile {
     if (!('id' in value) || value['id'] === undefined) return false;
     if (!('mediaType' in value) || value['mediaType'] === undefined) return false;
-    if (value['mediaType'] !== 'audio/wav') return false;
-    
     if (!('playbackUrl' in value) || value['playbackUrl'] === undefined) return false;
     if (!('sampleRate' in value) || value['sampleRate'] === undefined) return false;
     if (!('bitDepth' in value) || value['bitDepth'] === undefined) return false;

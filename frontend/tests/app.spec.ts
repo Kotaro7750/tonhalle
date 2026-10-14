@@ -343,3 +343,20 @@ test('skip navigation keeps the SPA route and focuses the content', async ({ pag
   await expect(page.getByRole('main')).toBeFocused()
   expect(page.url()).toContain(`/#/releases/${releaseId}`)
 })
+
+test('unknown technical properties do not invent durations or prevent playback', async ({ page }) => {
+  await mockLibrary(page)
+  const unknown = { ...track, durationMs: null, originalAudioFile: { ...track.originalAudioFile, bitDepth: null, bitrate: null } }
+  await page.route(`**/api/v0/releases/${releaseId}`, (route) => route.fulfill({ json: { ...release, tracks: [unknown, release.tracks[1]] } }))
+  await page.route(`**/api/v0/tracks/${trackId}`, (route) => route.fulfill({ json: unknown }))
+  await page.goto(`/#/releases/${releaseId}`)
+  await expect(page.getByText('2 tracks', { exact: true })).toBeVisible()
+  await expect(page.getByText('—', { exact: true })).toHaveCount(1)
+  await expect(page.getByText('0:15', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Play First Light', exact: true }).click()
+  const player = page.getByRole('dialog', { name: 'Player' })
+  await expect(player.getByRole('slider', { name: '再生位置' })).toBeEnabled()
+  await expect(player.getByText(/ bit/)).toHaveCount(0)
+  await expect.poll(() => page.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime)).toBeGreaterThan(0)
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
