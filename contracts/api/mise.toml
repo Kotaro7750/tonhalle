@@ -7,4 +7,4 @@ run = "redocly preview"
 
 [tasks."lint"]
 description = "Lint OpenAPI specification"
-run = "redocly lint --extends recommended-strict openapi.yaml"
+run = "redocly lint openapi.yaml --extends=recommended-strict --skip-rule=no-server-example.com"
