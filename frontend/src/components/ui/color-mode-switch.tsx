@@ -22,7 +22,7 @@ export function ColorModeSwitch() {
           <Moon size={14} />
         </Switch.Indicator>
       </Switch.Control>
-      <Switch.Label asChild><VisuallyHidden>ダークモード</VisuallyHidden></Switch.Label>
+      <Switch.Label asChild><VisuallyHidden>Dark mode</VisuallyHidden></Switch.Label>
     </Switch.Root>
   )
 }

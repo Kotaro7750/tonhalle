@@ -1,5 +1,5 @@
 import { Box, Container, HStack, Link, SkipNavContent, SkipNavLink, Text } from '@chakra-ui/react'
-import { AudioLines } from 'lucide-react'
+import { ArrowLeft, AudioLines } from 'lucide-react'
 import { Route, Routes, Link as RouterLink, matchPath, useLocation, useNavigate, type Location } from 'react-router-dom'
 import { useEffect, useRef } from 'react'
 import { ReleasesPage } from './pages/ReleasesPage'
@@ -18,14 +18,14 @@ export function App() {
   const main = useRef<HTMLDivElement>(null)
   useEffect(() => {
     window.scrollTo(0, 0)
-    document.title = 'Tonhalle — 音楽ライブラリ'
+    document.title = 'Tonhalle — Music Library'
   }, [pagePathname])
   useEffect(() => {
     if (!playerOpen) main.current?.focus({ preventScroll: true })
   }, [pagePathname, playerOpen])
   return (
     <>
-      <SkipNavLink onClick={(event) => { event.preventDefault(); main.current?.focus() }}>コンテンツへ移動</SkipNavLink>
+      <SkipNavLink onClick={(event) => { event.preventDefault(); main.current?.focus() }}>Skip to content</SkipNavLink>
       <Box as="header" borderBottomWidth="1" bg="bg.panel">
         <Container maxW="6xl" px={{ base: '5', md: '8' }} py="5">
           <HStack justify="space-between">
@@ -39,7 +39,7 @@ export function App() {
         <Routes location={pageLocation}>
           <Route path="/" element={<ReleasesPage />} />
           <Route path="/releases/:releaseId" element={<ReleasePage />} />
-          <Route path="*" element={<Box><Text mb="4">ページが見つかりません。</Text><Link asChild><RouterLink to="/">ライブラリに戻る</RouterLink></Link></Box>} />
+          <Route path="*" element={<Box><Text mb="4">Page not found.</Text><Link asChild><RouterLink to="/" aria-label="Back to library" title="ライブラリに戻る"><ArrowLeft size={16} /></RouterLink></Link></Box>} />
         </Routes>
       </Container>
       <MiniPlayer />

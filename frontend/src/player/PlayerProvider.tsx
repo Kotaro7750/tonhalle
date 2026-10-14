@@ -36,7 +36,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         update({ playing: false })
         return
       }
-      update({ playing: false, error: '音源を再生できませんでした。配信先や通信状況を確認し、もう一度お試しください。' })
+      update({ playing: false, error: 'Could not play audio. Check the source and your connection, then try again.' })
     })
   }, [track, update])
   const toggle = () => {
@@ -71,7 +71,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         onPause={() => update({ playing: false })}
         onEnded={() => update({ playing: false })}
         onTimeUpdate={syncTime}
-        onError={() => update({ playing: false, ready: false, error: '音源を読み込めませんでした。配信先や通信状況を確認してください。' })}
+        onError={() => update({ playing: false, ready: false, error: 'Could not load audio. Check the source and your connection.' })}
       />}
     </AudioContext.Provider>
   )

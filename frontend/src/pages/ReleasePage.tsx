@@ -22,7 +22,7 @@ export function ReleasePage() {
   const discs = [...new Set(release.tracks.map((track) => track.discNumber))]
   return (
     <Stack gap="10">
-      <Link asChild color="fg.muted"><RouterLink to="/"><ArrowLeft size={16} />Releases</RouterLink></Link>
+      <Link asChild color="fg.muted"><RouterLink to="/" aria-label="Releases" title="リリース一覧に戻る"><ArrowLeft size={16} /></RouterLink></Link>
       <Stack direction={{ base: 'column', md: 'row' }} gap={{ base: '6', md: '10' }} align={{ base: 'stretch', md: 'center' }}>
         <Box width={{ base: '40', md: '64' }} flexShrink="0"><RecordArt /></Box>
         <PageHeading eyebrow="RELEASE" title={release.title}>

@@ -19,7 +19,7 @@ async function request<T>(operation: () => Promise<T>): Promise<T> {
   } catch (error) {
     if (!(error instanceof ResponseError)) throw error
     const response = error.response
-    let message = response.status === 404 ? '指定された音楽が見つかりません。' : '音楽の情報を取得できませんでした。'
+    let message = response.status === 404 ? 'The requested music was not found.' : 'Could not load music information.'
     try {
       const problem: unknown = await response.clone().json()
       if (problem && typeof problem === 'object') {

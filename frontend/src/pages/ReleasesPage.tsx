@@ -1,4 +1,4 @@
-import { Box, Button, Card, Heading, Link, SimpleGrid, Stack, Text } from '@chakra-ui/react'
+import { Box, IconButton, Card, Heading, Link, SimpleGrid, Stack, Text } from '@chakra-ui/react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { ArrowDown } from 'lucide-react'
 import { useEffect, useRef } from 'react'
@@ -48,7 +48,7 @@ export function ReleasesPage() {
           </SimpleGrid>}
           <Box ref={sentinel}>
             {isFetchNextPageError && <ErrorNotice error={query.error!} retry={() => void fetchNextPage()} />}
-            {hasNextPage && !isFetchNextPageError && <Button width="full" variant="ghost" loading={isFetchingNextPage} loadingText="読み込み中…" onClick={() => void fetchNextPage()}><ArrowDown size={16} />さらに読み込む</Button>}
+            {hasNextPage && !isFetchNextPageError && <IconButton aria-label="Load more" title="さらに読み込む" width="full" variant="ghost" loading={isFetchingNextPage} onClick={() => void fetchNextPage()}><ArrowDown size={16} /></IconButton>}
             {!hasNextPage && !!uniqueItems.length && <Text textAlign="center" textStyle="sm" color="fg.muted">All releases loaded</Text>}
           </Box>
         </>
