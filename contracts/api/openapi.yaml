@@ -7,8 +7,8 @@ info:
     identifier: "MIT"
   description: "音楽再生・管理アプリケーション TonhalleのAPI"
 servers:
-  - url: "/api/v0"
-    description: "API Version 0"
+  - url: "http://localhost:3000/api/v0"
+    description: "Local development server"
 security: []
 tags:
   - name: "Releases"
