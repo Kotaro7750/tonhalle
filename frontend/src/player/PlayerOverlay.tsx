@@ -1,6 +1,7 @@
-import { Box, CloseButton, Drawer, Portal, VisuallyHidden } from '@chakra-ui/react'
+import { CloseButton, Drawer, Portal, VisuallyHidden } from '@chakra-ui/react'
 import { useEffect, useState } from 'react'
 import { Route, Routes, type Location } from 'react-router-dom'
+import { PlayerHandle } from './PlayerHandle'
 import { TrackPage } from '../pages/TrackPage'
 
 export function PlayerOverlay({ open, location, onClose }: { open: boolean; location: Location; onClose: () => void }) {
@@ -22,7 +23,7 @@ export function PlayerOverlay({ open, location, onClose }: { open: boolean; loca
         <Drawer.Positioner>
           <Drawer.Content maxW="6xl" mx="auto" maxH="92dvh" roundedTop="2xl" overflow="hidden" _motionReduce={{ animation: 'none' }}>
             <Drawer.Title asChild><VisuallyHidden>Player</VisuallyHidden></Drawer.Title>
-            <Box aria-hidden="true" w="12" h="1" rounded="full" bg="border.emphasized" mx="auto" mt="3" mb="4" flexShrink="0" />
+            <PlayerHandle label="Collapse player" onActivate={onClose} onUp={() => {}} onDown={onClose} />
             <Drawer.CloseTrigger asChild><CloseButton aria-label="Close player" /></Drawer.CloseTrigger>
             <Drawer.Body px={{ base: '5', md: '8' }} pt="4" pb="8" minH="0">
               <Routes location={open ? location : lastLocation}>

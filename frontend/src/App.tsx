@@ -8,6 +8,7 @@ import { MiniPlayer } from './player/MiniPlayer'
 import { PlayerOverlay } from './player/PlayerOverlay'
 import { ColorModeSwitch } from './components/ui/color-mode-switch'
 import { Brand } from './components/Brand'
+import { Footer } from './components/Footer'
 
 export function App() {
   const location = useLocation()
@@ -24,7 +25,7 @@ export function App() {
     if (!playerOpen) main.current?.focus({ preventScroll: true })
   }, [pagePathname, playerOpen])
   return (
-    <>
+    <Box minH="100dvh" display="flex" flexDirection="column">
       <SkipNavLink onClick={(event) => { event.preventDefault(); main.current?.focus() }}>Skip to content</SkipNavLink>
       <Box as="header" borderBottomWidth="1" bg="bg.panel">
         <Container maxW="6xl" px={{ base: '5', md: '8' }} py="5">
@@ -34,7 +35,7 @@ export function App() {
           </HStack>
         </Container>
       </Box>
-      <Container as="main" ref={main} tabIndex={-1} outline="none" maxW="6xl" px={{ base: '5', md: '8' }} pt={{ base: '8', md: '12' }} pb="36">
+      <Container as="main" ref={main} tabIndex={-1} outline="none" maxW="6xl" px={{ base: '5', md: '8' }} pt={{ base: '8', md: '12' }} pb="12" flex="1">
         <SkipNavContent />
         <Routes location={pageLocation}>
           <Route path="/" element={<ReleasesPage />} />
@@ -43,10 +44,11 @@ export function App() {
         </Routes>
       </Container>
       <MiniPlayer />
+      <Footer />
       <PlayerOverlay open={playerOpen} location={location} onClose={() => {
         if (backgroundLocation) void navigate(-1)
         else void navigate('/', { replace: true })
       }} />
-    </>
+    </Box>
   )
 }
