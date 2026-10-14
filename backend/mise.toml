@@ -1,0 +1,23 @@
+[tools]
+rust = "1.99"
+
+[tasks.dev]
+dir = "."
+run = "cargo run --locked"
+
+[tasks.dev.env]
+TONHALLE_CONTENT_STORAGE__ROOT_PATH = "../sample"
+TONHALLE_CONTENT_STORAGE__PLAYBACK_URL_BASE = "http://localhost:8000/"
+
+[tasks.test]
+dir = "."
+run = "cargo test --locked --all-features"
+
+[tasks.check]
+dir = "."
+run = ["cargo fmt --check", "cargo clippy --locked --all-targets --all-features -- -D warnings"]
+
+[tasks."openapi:generate"]
+dir = "."
+# Keep named integer types intact, as in Galerie's rust-axum generation.
+run = "openapi-generator-cli generate -i ../contracts/api/openapi.yaml -g rust-axum -o openapi_generated --type-mappings UUID=String,i64=i64 --package-name tonhalle_api --additional-properties hideGenerationTimestamp=true --enable-post-process-file"
