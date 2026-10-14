@@ -2,10 +2,24 @@ import { test, expect } from '@playwright/test'
 import { mockLibrary, trackId } from './fixtures'
 
 test('shared controls seek, restart and repeat in both players', async ({ page }, testInfo) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  if (page.viewportSize()!.width < 768) await page.setViewportSize({ width: 375, height: 667 })
   await mockLibrary(page)
   await page.goto(`/#/tracks/${trackId}`)
   const player = page.getByRole('dialog', { name: 'Player' })
   const audio = page.locator('audio')
+  await expect(player.getByRole('group', { name: 'Playback', exact: true }).getByRole('button')).toHaveCount(5)
+  await expect(player.getByRole('group', { name: 'Repeat and restart', exact: true }).getByRole('button')).toHaveCount(2)
+  const playbackHeight = (await player.getByRole('group', { name: 'Playback', exact: true }).boundingBox())!.height
+  expect((await player.getByRole('group', { name: 'Repeat and restart', exact: true }).boundingBox())!.height).toBe(playbackHeight)
+  if (page.viewportSize()!.width >= 768) {
+    const playback = (await player.getByRole('group', { name: 'Playback', exact: true }).boundingBox())!
+    const repeat = (await player.getByRole('group', { name: 'Repeat and restart', exact: true }).boundingBox())!
+    const queue = (await player.getByRole('button', { name: 'Open queue' }).boundingBox())!
+    expect(playback.x + playback.width).toBeLessThanOrEqual(repeat.x)
+    expect(repeat.x + repeat.width).toBeLessThanOrEqual(queue.x)
+    expect(Math.abs(playback.y + playback.height / 2 - repeat.y - repeat.height / 2)).toBeLessThan(2)
+  }
   await expect(player.getByRole('button', { name: 'Forward 15 seconds' })).toBeEnabled()
   await player.getByRole('button', { name: 'Forward 15 seconds' }).click()
   await expect.poll(() => audio.evaluate((el: HTMLAudioElement) => el.currentTime)).toBe(15)
@@ -13,8 +27,8 @@ test('shared controls seek, restart and repeat in both players', async ({ page }
   await expect.poll(() => audio.evaluate((el: HTMLAudioElement) => el.currentTime)).toBe(0)
   await player.getByRole('button', { name: 'Back 15 seconds' }).click()
   expect(await audio.evaluate((el: HTMLAudioElement) => el.currentTime)).toBe(0)
-  await player.getByRole('button', { name: 'Repeat track' }).click()
-  await expect(player.getByRole('button', { name: 'Repeat track' })).toHaveAttribute('aria-pressed', 'true')
+  await player.getByRole('button', { name: 'Repeat mode' }).click()
+  await expect(player.getByRole('button', { name: 'Repeat mode' })).toHaveAttribute('aria-pressed', 'true')
   await player.getByRole('button', { name: 'Play', exact: true }).click()
   await audio.evaluate((el: HTMLAudioElement) => { el.currentTime = 14.8 })
   await expect.poll(() => audio.evaluate((el: HTMLAudioElement) => el.currentTime)).toBeLessThan(2)
@@ -23,19 +37,40 @@ test('shared controls seek, restart and repeat in both players', async ({ page }
   await page.screenshot({ path: testInfo.outputPath('expanded-controls.png') })
   await player.getByRole('button', { name: 'Close player' }).click()
   const mini = page.getByRole('complementary', { name: 'Now playing' })
-  await expect(mini.getByRole('button', { name: 'Repeat track' })).toHaveAttribute('aria-pressed', 'true')
+  const miniPlayback = (await mini.getByRole('group', { name: 'Playback', exact: true }).boundingBox())!
+  const miniRepeat = (await mini.getByRole('group', { name: 'Repeat and restart', exact: true }).boundingBox())!
+  const miniQueue = (await mini.getByRole('button', { name: 'Open queue' }).boundingBox())!
+  expect(miniPlayback.height).toBe(miniRepeat.height)
+  expect(miniRepeat.x + miniRepeat.width).toBeLessThanOrEqual(miniQueue.x)
+  if (page.viewportSize()!.width < 768) {
+    expect(miniRepeat.y + miniRepeat.height).toBeLessThanOrEqual(miniPlayback.y)
+    expect(miniQueue.y + miniQueue.height).toBeLessThanOrEqual(miniPlayback.y)
+  } else {
+    expect(miniPlayback.x + miniPlayback.width).toBeLessThanOrEqual(miniRepeat.x)
+  }
+  const surface = mini.locator('.chakra-linkbox')
+  const background = await surface.evaluate((el) => getComputedStyle(el).backgroundColor)
+  const shadow = await surface.evaluate((el) => getComputedStyle(el).boxShadow)
+  await surface.hover()
+  if (await page.evaluate(() => matchMedia('(hover: hover)').matches)) {
+    await expect.poll(() => surface.evaluate((el) => getComputedStyle(el).boxShadow)).not.toBe(shadow)
+  }
+  expect(await surface.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(background)
+  await expect(mini.getByRole('button', { name: 'Repeat mode' })).toHaveAttribute('aria-pressed', 'true')
   await mini.getByRole('button', { name: 'Forward 15 seconds' }).click()
   await expect.poll(() => audio.evaluate((el: HTMLAudioElement) => el.currentTime)).toBe(15)
   await mini.getByRole('button', { name: 'Restart track' }).click()
   await expect.poll(() => audio.evaluate((el: HTMLAudioElement) => el.currentTime)).toBe(0)
   expect(await audio.evaluate((el: HTMLAudioElement) => el.paused)).toBe(true)
-  await mini.getByRole('button', { name: 'Repeat track' }).click()
+  await mini.getByRole('button', { name: 'Repeat mode' }).click()
   expect(await audio.evaluate((el: HTMLAudioElement) => el.loop)).toBe(false)
+  await mini.getByRole('button', { name: 'Repeat mode' }).click()
+  await mini.getByRole('button', { name: 'Repeat mode' }).click()
   await expect(player).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('mini-controls.png') })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await mini.getByRole('link', { name: 'Open player: First Light' }).click()
-  await expect(player.getByRole('button', { name: 'Repeat track' })).toHaveAttribute('aria-pressed', 'false')
+  await expect(player.getByRole('button', { name: 'Repeat mode' })).toHaveAttribute('aria-pressed', 'false')
 })
 
 test('starting, resuming and switching tracks keeps the mini player collapsed', async ({ page }) => {
@@ -78,4 +113,30 @@ test('starting, resuming and switching tracks keeps the mini player collapsed', 
   const pageHeight = await page.evaluate(() => document.documentElement.scrollHeight)
   await mini.evaluate((element) => { element.style.display = 'none' })
   expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(pageHeight)
+})
+
+test('compact player keeps playback at the bottom on a small screen', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 568 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await mockLibrary(page)
+  await page.goto(`/#/tracks/${trackId}`)
+  const player = page.getByRole('dialog', { name: 'Player' })
+  const playback = player.getByRole('group', { name: 'Playback', exact: true })
+  const secondary = player.getByRole('group', { name: 'Repeat and restart', exact: true })
+  const queue = player.getByRole('button', { name: 'Open queue' })
+  await expect(queue).toBeVisible()
+  await expect(playback).toBeVisible()
+  const bounds = (await playback.boundingBox())!
+  const secondaryBounds = (await secondary.boundingBox())!
+  const queueBounds = (await queue.boundingBox())!
+  const playerBounds = (await player.boundingBox())!
+  expect(secondaryBounds.height).toBe(bounds.height)
+  expect(queueBounds.y).toBeGreaterThanOrEqual(secondaryBounds.y)
+  expect(queueBounds.y + queueBounds.height).toBeLessThanOrEqual(bounds.y)
+  expect(playerBounds.y + playerBounds.height - bounds.y - bounds.height).toBeLessThanOrEqual(20)
+  expect(bounds.x).toBeGreaterThanOrEqual(0)
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(320)
+  await page.screenshot({ path: testInfo.outputPath('compact-player.png') })
+  await queue.click()
+  await expect(page.getByRole('dialog', { name: 'Queue', exact: true })).toBeVisible()
 })

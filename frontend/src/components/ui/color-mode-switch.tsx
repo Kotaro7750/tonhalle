@@ -1,5 +1,5 @@
 import { Switch, VisuallyHidden } from '@chakra-ui/react'
-import { Moon, Sun } from 'lucide-react'
+import { Moon, Sun } from '../Icons'
 import { useTheme } from 'next-themes'
 
 export function ColorModeSwitch() {
@@ -16,9 +16,9 @@ export function ColorModeSwitch() {
       title="ダークモード"
     >
       <Switch.HiddenInput role="switch" />
-      <Switch.Control>
-        <Switch.Thumb />
-        <Switch.Indicator fallback={<Sun size={14} />} color="fg.muted" _checked={{ color: 'colorPalette.contrast' }}>
+      <Switch.Control bg="colorPalette.muted" _checked={{ bg: 'colorPalette.solid' }}>
+        <Switch.Thumb bg="colorPalette.subtle" _checked={{ bg: 'colorPalette.contrast' }} />
+        <Switch.Indicator fallback={<Sun size={14} />} color="colorPalette.fg" _checked={{ color: 'colorPalette.contrast' }}>
           <Moon size={14} />
         </Switch.Indicator>
       </Switch.Control>

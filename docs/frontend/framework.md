@@ -22,8 +22,11 @@ SPAフレームワークとしては[React](https://ja.react.dev/)を利用す�
 バージョンは最新のv3系列を使用する。
 
 ## アイコンセット
-[Lucide](https://lucide.dev/)を使用する。
-公式で[Reactパッケージ](https://lucide.dev/guide/react/)が用意されているため実際にはそれを利用する。
+[react-icons](https://react-icons.github.io/react-icons/)を使用する。
+
+通常のUIにはLucideを基本として使用し、不足するアイコンはreact-iconsに収録された他のセットで補う。
+
+アウトラインとフィルの両方が用意されているアイコンは、ライトモードではアウトライン、ダークモードではフィルを使用する。
 
 ## OAuth 2.0
 OAuth 2.0 Authorization Code Flow with PKCE及びOpenID Connectの処理には、

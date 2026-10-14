@@ -1,12 +1,13 @@
 import { Box, IconButton, Card, Heading, Link, SimpleGrid, Stack, Text } from '@chakra-ui/react'
 import { useInfiniteQuery } from '@tanstack/react-query'
-import { ArrowDown } from 'lucide-react'
+import { ArrowDown } from '../components/Icons'
 import { useEffect, useRef } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import { releaseListOptions } from '../api/queries'
 import { EmptyLibrary, ErrorNotice, Loading } from '../components/Feedback'
 import { PageHeading } from '../components/PageHeading'
 import { RecordArt } from '../components/RecordArt'
+import { CollectionActions } from '../player/CollectionActions'
 import { artistName } from '../format'
 
 export function ReleasesPage() {
@@ -32,7 +33,7 @@ export function ReleasesPage() {
         <>
           {!uniqueItems.length ? <EmptyLibrary /> : <SimpleGrid columns={{ base: 2, md: 3, lg: 4 }} gap={{ base: '5', md: '8' }}>
             {uniqueItems.map((release) => <Card.Root key={release.id} variant="outline" bg="bg.panel" overflow="hidden">
-              <Link asChild display="block" height="full" color="fg" textDecoration="none" _hover={{ bg: 'bg.subtle' }}>
+              <Link asChild display="block" flex="1" color="fg" textDecoration="none" _hover={{ bg: 'bg.subtle' }}>
                 <RouterLink to={`/releases/${release.id}`}>
                   <Card.Body gap="4" p={{ base: '3', md: '5' }}>
                     <RecordArt />
@@ -44,6 +45,7 @@ export function ReleasesPage() {
                   </Card.Body>
                 </RouterLink>
               </Link>
+              <Card.Footer justifyContent="flex-end" px={{ base: '3', md: '5' }} py="2"><CollectionActions releaseId={release.id} title={release.title} /></Card.Footer>
             </Card.Root>)}
           </SimpleGrid>}
           <Box ref={sentinel}>

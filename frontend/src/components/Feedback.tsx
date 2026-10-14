@@ -1,5 +1,5 @@
 import { Alert, IconButton, Center, Heading, Spinner, Stack, Text } from '@chakra-ui/react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw } from './Icons'
 import { ApiError } from '../api/client'
 
 export function Loading() {

@@ -1,5 +1,5 @@
 import { Box, Button } from '@chakra-ui/react'
-import { ChevronsUp } from 'lucide-react'
+import { ChevronsUp } from '../components/Icons'
 import { useRef, useState } from 'react'
 
 export function PlayerHandle({ label, minimized = false, onActivate, onUp, onDown }: {
