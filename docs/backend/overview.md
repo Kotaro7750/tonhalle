@@ -5,10 +5,10 @@
 - 本ディレクトリ中のドキュメントの構造
 
 # 本ディレクトリの役割
-本ディレクトリには、バックエンドAPIサーバーに関する設計ドキュメントを配置する。
+本ディレクトリには、バックエンドに関する設計ドキュメントを配置する。
 
 # 本ディレクトリのドキュメントの構造
 - [overview.md](./overview.md): 本ドキュメント
 - [framework.md](./framework.md): バックエンドAPIサーバーで使用する主要な技術スタックとバージョンの選定方針を記述する
-- [software_architecture.md](./software_architecture.md): バックエンドAPIサーバーのソフトウェアアーキテクチャの設計方針及びハイレベルなコンポーネント層の構成と責務を記述する
+- [software_architecture.md](./software_architecture.md): バックエンドのソフトウェアアーキテクチャの設計方針及びハイレベルなコンポーネント層の構成と責務を記述する
 - [coding_guidelines.md](./coding_guidelines.md): バックエンドコードの構造化、コメント、テストに関するコーディング規約を記述する

@@ -21,11 +21,11 @@
 - [api.md](./api.md): API 契約の作成方針
 - [architecture.md](./architecture.md): システム構成と各構成要素の責務
 - [artifacts.md](./artifacts.md): 成果物の配置
-- [backend](./backend/): バックエンドAPIサーバーに関する設計ドキュメントを配置するドキュメント階層。配下のドキュメント構造は[backend/overview.md](./backend/overview.md)に記載
+- [backend](./backend/): バックエンドに関する設計ドキュメントを配置するドキュメント階層。配下のドキュメント構造は[backend/overview.md](./backend/overview.md)に記載
 - [domain.md](./domain.md): ドメインモデルの定義
 - [frontend/overview.md](./frontend/overview.md): フロントエンドSPAに関する設計ドキュメントを配置するドキュメント階層。配下のドキュメント構造は[frontend/overview.md](./frontend/overview.md)に記載
-- [music_data.md](./music_data.md): 実際の音源データ
-- [music_data_storage.md](./music_data_storage.md): 音源データストレージの要件
+- [music_data.md](./music_data.md): 音源データのフォーマットと取り込み・検証
+- [music_storages.md](./music_storages.md): 音源データに関連する各ストレージの責務と要件
 - [roadmap.md](./roadmap.md): 本プロジェクトにおける今後の開発計画を記述する
 - [versioning.md](./versioning.md): 成果物ごとのバージョン管理方針
 
