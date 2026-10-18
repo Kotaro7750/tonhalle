@@ -24,8 +24,10 @@ pub(crate) enum ReleaseMetadataValidationError {
 }
 
 /// Validated release metadata extracted alongside one track.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(getset::Getters, Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReleaseMetadata {
+    /// Identifies the release derived from embedded metadata.
+    #[getset(get = "pub(crate)")]
     id: ReleaseId,
     title: String,
     release_date: String,
@@ -58,11 +60,6 @@ impl ReleaseMetadata {
             release_date: release_date.to_owned(),
             artist_credits,
         })
-    }
-
-    /// Identifies the release derived from embedded metadata.
-    pub(crate) fn id(&self) -> &ReleaseId {
-        &self.id
     }
 }
 
@@ -106,12 +103,22 @@ pub(crate) enum ReleasesValidationError {
 }
 
 /// A release with its tracks ordered for display.
-#[derive(Debug, Clone)]
+#[derive(getset::Getters, Debug, Clone)]
 pub(crate) struct Release {
+    /// Exposes the identity shared by the release and its tracks.
+    #[getset(get = "pub(crate)")]
     id: ReleaseId,
+    /// Preserves the accepted release title for display.
+    #[getset(get = "pub(crate)")]
     title: String,
+    /// Preserves the accepted release date precision.
+    #[getset(get = "pub(crate)")]
     release_date: String,
+    /// Exposes release credits in display order.
+    #[getset(get = "pub(crate)")]
     artist_credits: Vec<ArtistCredit>,
+    /// Exposes accepted tracks in disc and track order.
+    #[getset(get = "pub(crate)")]
     tracks: Vec<Track>,
 }
 
@@ -166,31 +173,6 @@ impl Release {
             artist_credits: metadata.artist_credits,
             tracks,
         })
-    }
-
-    /// Exposes the identity shared by the release and its tracks.
-    pub(crate) fn id(&self) -> &ReleaseId {
-        &self.id
-    }
-
-    /// Preserves the accepted release title for display.
-    pub(crate) fn title(&self) -> &str {
-        &self.title
-    }
-
-    /// Preserves the accepted release date precision.
-    pub(crate) fn release_date(&self) -> &str {
-        &self.release_date
-    }
-
-    /// Exposes release credits in display order.
-    pub(crate) fn artist_credits(&self) -> &[ArtistCredit] {
-        &self.artist_credits
-    }
-
-    /// Exposes accepted tracks in disc and track order.
-    pub(crate) fn tracks(&self) -> &[Track] {
-        &self.tracks
     }
 }
 
@@ -267,12 +249,12 @@ mod tests {
         let id = source.build_release_metadata().unwrap().id().clone();
 
         let mut second = sample_fixture();
-        second.track_number = "2".into();
-        second.audio_file.id = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
+        *second.track_number_mut() = "2".into();
+        *second.audio_file_mut().id_mut() = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
 
         let first_original = second.build_track(&id).unwrap();
 
-        second.audio_file.id = "925eda40-54cb-4af4-9579-6811fc7477ac".parse().unwrap();
+        *second.audio_file_mut().id_mut() = "925eda40-54cb-4af4-9579-6811fc7477ac".parse().unwrap();
         let duplicate = second.build_track(&id).unwrap();
 
         let release = Release::new(
@@ -306,8 +288,8 @@ mod tests {
             let mut changed = sample_fixture();
 
             match field {
-                "title" => changed.release_title.push(' '),
-                _ => changed.release_artists.names[0].push(' '),
+                "title" => changed.release_title_mut().push(' '),
+                _ => changed.release_artists_mut().names_mut()[0].push(' '),
             }
 
             let duplicate = changed.build_track(&id).unwrap();
@@ -332,7 +314,7 @@ mod tests {
         ));
 
         let mut other = sample_fixture();
-        other.release_title.push_str(" Other");
+        other.release_title_mut().push_str(" Other");
         let other_id = other.build_release_metadata().unwrap().id().clone();
 
         assert!(matches!(
@@ -340,8 +322,8 @@ mod tests {
             Err(ReleaseValidationError::WrongRelease { .. })
         ));
 
-        other.release_title = source.release_title.clone();
-        other.track_number = "2".into();
+        *other.release_title_mut() = source.release_title().clone();
+        *other.track_number_mut() = "2".into();
 
         assert!(matches!(
             Release::new(
@@ -385,11 +367,11 @@ mod tests {
         let first = source.build_release_metadata().unwrap();
 
         let mut changed = sample_fixture();
-        changed.track_artists.names = vec!["Different Track Performer".into()];
+        *changed.track_artists_mut().names_mut() = vec!["Different Track Performer".into()];
 
         assert_eq!(first.id(), changed.build_release_metadata().unwrap().id());
 
-        changed.release_title.push_str(" Revised");
+        changed.release_title_mut().push_str(" Revised");
 
         assert_ne!(first.id(), changed.build_release_metadata().unwrap().id());
     }
@@ -400,9 +382,9 @@ mod tests {
             let mut fixture = sample_fixture();
 
             match field {
-                "title" => fixture.release_title = " \t".into(),
-                "credits" => fixture.release_artists.names.clear(),
-                _ => fixture.release_artists.names = vec![" \t".into()],
+                "title" => *fixture.release_title_mut() = " \t".into(),
+                "credits" => fixture.release_artists_mut().names_mut().clear(),
+                _ => *fixture.release_artists_mut().names_mut() = vec![" \t".into()],
             }
 
             let error = fixture.build_release_metadata().unwrap_err();
@@ -437,14 +419,14 @@ mod tests {
         ));
 
         let mut other = MetadataFixture::from(&source);
-        other.release_title.push_str(" Other");
+        other.release_title_mut().push_str(" Other");
 
         assert!(matches!(
             validate_releases(&[first.clone(), other.release()]),
             Err(ReleasesValidationError::SharedAudioFile { .. })
         ));
 
-        other.audio_file.id = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
+        *other.audio_file_mut().id_mut() = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
         let second = other.release();
 
         assert!(validate_releases(&[first.clone(), second.clone()]).is_ok());

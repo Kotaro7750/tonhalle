@@ -26,9 +26,13 @@ pub(crate) enum ArtistCreditValidationError {
 }
 
 /// An artist attribution in the source credit order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(getset::Getters, Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ArtistCredit {
+    /// Identifies the credited artist independently of its display spelling.
+    #[getset(get = "pub(crate)")]
     artist_id: ArtistId,
+    /// Preserves the artist spelling supplied by the source metadata.
+    #[getset(get = "pub(crate)")]
     name: String,
     join_phrase: Option<String>,
 }
@@ -41,16 +45,6 @@ impl ArtistCredit {
             name,
             join_phrase,
         }
-    }
-
-    /// Identifies the credited artist independently of its display spelling.
-    pub(crate) fn artist_id(&self) -> &ArtistId {
-        &self.artist_id
-    }
-
-    /// Preserves the artist spelling supplied by the source metadata.
-    pub(crate) fn name(&self) -> &str {
-        &self.name
     }
 
     /// Preserves the separator used to join this credit to the next artist.

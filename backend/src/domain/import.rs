@@ -26,27 +26,23 @@ pub(crate) enum ImportValidationError {
 }
 
 /// A validated source audio retaining its exact original bytes.
+#[derive(getset::Getters)]
 pub(crate) struct ImportAudio {
     track_metadata: TrackMetadata,
+    /// Provides the validated format and playback properties.
+    #[getset(get = "pub(crate)")]
     properties: AudioProperties,
+    /// Provides unchanged source bytes.
+    #[getset(get = "pub(crate)")]
     bytes: Vec<u8>,
 }
 
-impl ImportAudio {
-    /// Provides the validated format and playback properties.
-    pub(crate) fn properties(&self) -> &AudioProperties {
-        &self.properties
-    }
-
-    /// Provides unchanged source bytes.
-    pub(crate) fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-}
-
 /// A complete release eligible for storage with newly issued audio identities.
+#[derive(getset::Getters)]
 pub(crate) struct ImportRelease {
     metadata: ReleaseMetadata,
+    /// Provides every validated source for release-level persistence.
+    #[getset(get = "pub(crate)")]
     audio: Vec<ImportAudio>,
 }
 
@@ -58,10 +54,10 @@ impl ImportRelease {
         let mut tracks = HashSet::new();
         for bytes in sources {
             let parsed = parse_audio(&bytes)?;
-            let current = parsed.release_metadata;
+            let (track_metadata, current, properties) = parsed.into_parts();
             let source = ImportAudio {
-                track_metadata: parsed.track_metadata,
-                properties: parsed.properties,
+                track_metadata,
+                properties,
                 bytes,
             };
             if metadata
@@ -88,11 +84,6 @@ impl ImportRelease {
     pub(crate) fn id(&self) -> &ReleaseId {
         self.metadata.id()
     }
-
-    /// Provides every validated source for release-level persistence.
-    pub(crate) fn audio(&self) -> &[ImportAudio] {
-        &self.audio
-    }
 }
 
 /// Verifies import-specific rejection while sharing metadata constraints with indexing.
@@ -115,7 +106,7 @@ mod tests {
         ));
 
         let mut changed = sample_fixture();
-        changed.release_title.push_str(" changed");
+        changed.release_title_mut().push_str(" changed");
         assert!(matches!(
             ImportRelease::new(vec![original.clone(), sample_audio(&changed.build())]),
             Err(ImportValidationError::MetadataMismatch)
@@ -123,10 +114,10 @@ mod tests {
         for field in 0..4 {
             let mut invalid = sample_fixture();
             match field {
-                0 => invalid.track_title.clear(),
-                1 => invalid.release_date = "2026-02-30".into(),
-                2 => invalid.disc_number = "0".into(),
-                _ => invalid.track_artists.names.clear(),
+                0 => invalid.track_title_mut().clear(),
+                1 => *invalid.release_date_mut() = "2026-02-30".into(),
+                2 => *invalid.disc_number_mut() = "0".into(),
+                _ => invalid.track_artists_mut().names_mut().clear(),
             }
             assert!(
                 ImportRelease::new(vec![original.clone(), sample_audio(&invalid.build())]).is_err()

@@ -11,6 +11,7 @@ axum = "0.8"
 base64 = "0.23"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 clap = { version = "4", features = ["derive", "env"] }
+getset = "0.1"
 hex = "0.4"
 itertools = "0.15"
 lofty = "0.25"

@@ -191,7 +191,7 @@ async fn list_releases_defaults_to_thirty_and_rejects_unknown_cursor_positions()
         let mut source =
             crate::test_support::MetadataFixture::from(&crate::test_support::sample_metadata());
 
-        source.release_title = format!("Pagination Release {i}");
+        *source.release_title_mut() = format!("Pagination Release {i}");
 
         crate::test_support::sample_release(&source.build())
     };
@@ -303,16 +303,16 @@ async fn music_api_indexes_supported_formats_with_detected_types_and_optional_bi
         std::fs::create_dir(&directory).unwrap();
         let path = directory.join(format!(
             "{}.{}",
-            fixture.audio_file.id,
+            fixture.audio_file().id(),
             extension.to_uppercase()
         ));
         std::fs::write(&path, bytes).unwrap();
         let mut tag = Tag::new(FileType::from_ext(extension).unwrap().primary_tag_type());
         for (key, value) in [
-            (ItemKey::AlbumTitle, fixture.release_title.as_str()),
-            (ItemKey::ReleaseDate, fixture.release_date.as_str()),
+            (ItemKey::AlbumTitle, fixture.release_title().as_str()),
+            (ItemKey::ReleaseDate, fixture.release_date().as_str()),
             (ItemKey::AlbumArtist, "Example Artist"),
-            (ItemKey::TrackTitle, fixture.track_title.as_str()),
+            (ItemKey::TrackTitle, fixture.track_title().as_str()),
             (ItemKey::DiscNumber, "1"),
             (ItemKey::TrackNumber, "1"),
         ] {
@@ -342,7 +342,7 @@ async fn music_api_indexes_supported_formats_with_detected_types_and_optional_bi
         let track_id = release["tracks"][0]["id"].as_str().unwrap();
         let (status, track) = request(app, &format!("/api/v0/tracks/{track_id}")).await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(track["title"], fixture.track_title);
+        assert_eq!(track["title"], fixture.track_title().as_str());
         assert_eq!(
             track["artistCredits"][0]["name"], "First Artist",
             "{extension}"
@@ -352,7 +352,7 @@ async fn music_api_indexes_supported_formats_with_detected_types_and_optional_bi
             "{extension}"
         );
         let audio = &track["originalAudioFile"];
-        assert_eq!(audio["id"], fixture.audio_file.id.to_string());
+        assert_eq!(audio["id"], fixture.audio_file().id().to_string());
         assert_eq!(audio["mediaType"], media_type, "{extension}");
         assert_eq!(audio["bitDepth"], bit_depth, "{extension}");
         assert_eq!(

@@ -38,11 +38,21 @@ pub(crate) enum ReadImportAudioError {
 }
 
 /// A source-defined release grouping with opaque audio locators.
+#[derive(getset::Getters)]
 pub(crate) struct ImportCandidate {
     /// Identifies the candidate for diagnostics.
-    pub(crate) key: String,
+    #[getset(get = "pub(crate)")]
+    key: String,
     /// Preserves the source adapter's audio order.
-    pub(crate) audio_keys: Vec<String>,
+    #[getset(get = "pub(crate)")]
+    audio_keys: Vec<String>,
+}
+
+impl ImportCandidate {
+    /// Groups opaque audio locators under their diagnostic identity.
+    pub(crate) fn new(key: String, audio_keys: Vec<String>) -> Self {
+        Self { key, audio_keys }
+    }
 }
 
 /// Provides candidates and bytes from independent read-only storage.

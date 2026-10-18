@@ -33,14 +33,17 @@ enum ImportCandidateError {
 }
 
 /// Counts all candidate outcomes after a complete source enumeration.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, getset::CopyGetters)]
 pub(crate) struct ImportSummary {
     /// Number of releases successfully published.
-    pub(crate) saved: usize,
+    #[getset(get_copy = "pub(crate)")]
+    saved: usize,
     /// Number of already existing releases retained.
-    pub(crate) skipped: usize,
+    #[getset(get_copy = "pub(crate)")]
+    skipped: usize,
     /// Number of candidates rejected during reading, validation, or saving.
-    pub(crate) failed: usize,
+    #[getset(get_copy = "pub(crate)")]
+    failed: usize,
 }
 
 /// Coordinates release-level validation and persistence independently of transport.
@@ -62,7 +65,7 @@ impl ImportMusicUseCase {
         for candidate in candidates {
             let result = (|| -> Result<SaveReleaseOutcome, ImportCandidateError> {
                 let bytes = candidate
-                    .audio_keys
+                    .audio_keys()
                     .iter()
                     .map(|key| self.source.read_audio(key))
                     .collect::<Result<Vec<_>, _>>()?;
@@ -74,7 +77,7 @@ impl ImportMusicUseCase {
                 Ok(SaveReleaseOutcome::AlreadyExists) => summary.skipped += 1,
                 Err(error) => {
                     summary.failed += 1;
-                    tracing::warn!(candidate = %candidate.key, error = %error, "Release import failed");
+                    tracing::warn!(candidate = %candidate.key(), error = %error, "Release import failed");
                 }
             }
         }

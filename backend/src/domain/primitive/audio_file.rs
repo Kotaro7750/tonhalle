@@ -25,12 +25,22 @@ pub(crate) struct AudioFile {
 }
 
 /// Validated audio properties independent of storage identity and location.
-#[derive(Debug, Clone)]
+#[derive(getset::CopyGetters, Debug, Clone)]
 pub(crate) struct AudioProperties {
+    /// Provides the validated media type.
+    #[getset(get_copy = "pub(crate)")]
     media_type: &'static str,
+    /// Provides the validated sample rate.
+    #[getset(get_copy = "pub(crate)")]
     sample_rate: u32,
+    /// Provides the validated bit depth.
+    #[getset(get_copy = "pub(crate)")]
     bit_depth: Option<u32>,
+    /// Provides the validated channels.
+    #[getset(get_copy = "pub(crate)")]
     channels: u32,
+    /// Provides the validated bitrate.
+    #[getset(get_copy = "pub(crate)")]
     bitrate: Option<u32>,
 }
 
@@ -117,26 +127,6 @@ impl AudioProperties {
             bitrate,
         })
     }
-    /// Provides the validated media type.
-    pub(crate) fn media_type(&self) -> &'static str {
-        self.media_type
-    }
-    /// Provides the validated sample rate.
-    pub(crate) fn sample_rate(&self) -> u32 {
-        self.sample_rate
-    }
-    /// Provides the validated bit depth.
-    pub(crate) fn bit_depth(&self) -> Option<u32> {
-        self.bit_depth
-    }
-    /// Provides the validated channels.
-    pub(crate) fn channels(&self) -> u32 {
-        self.channels
-    }
-    /// Provides the validated bitrate.
-    pub(crate) fn bitrate(&self) -> Option<u32> {
-        self.bitrate
-    }
 }
 
 /// Verifies required properties and the bitrate range at audio-file construction.
@@ -148,14 +138,14 @@ mod tests {
     #[test]
     fn audio_file_new_rejects_missing_properties_and_bitrate_overflow() {
         for field in 0..5 {
-            let mut invalid = sample_fixture().audio_file;
+            let mut invalid = sample_fixture().audio_file().clone();
 
             match field {
-                0 => invalid.sample_rate = 0,
-                1 => invalid.bit_depth = Some(0),
-                2 => invalid.channels = 0,
-                3 => invalid.bitrate = Some(0),
-                4 => invalid.bitrate = Some(u64::from(u32::MAX) + 1),
+                0 => *invalid.sample_rate_mut() = 0,
+                1 => *invalid.bit_depth_mut() = Some(0),
+                2 => *invalid.channels_mut() = 0,
+                3 => *invalid.bitrate_mut() = Some(0),
+                4 => *invalid.bitrate_mut() = Some(u64::from(u32::MAX) + 1),
                 _ => unreachable!(),
             }
 
@@ -175,24 +165,24 @@ mod tests {
             "audio/mp4",
             "audio/ogg",
         ] {
-            let mut missing_precision = sample_fixture().audio_file;
-            missing_precision.media_type = media_type;
-            missing_precision.bit_depth = None;
-            missing_precision.bitrate = None;
+            let mut missing_precision = sample_fixture().audio_file().clone();
+            *missing_precision.media_type_mut() = media_type;
+            *missing_precision.bit_depth_mut() = None;
+            *missing_precision.bitrate_mut() = None;
             let audio = missing_precision.build().unwrap();
             assert!(audio.bit_depth().is_none());
             assert!(audio.bitrate().is_none());
-            assert_eq!(audio.id(), missing_precision.id);
+            assert_eq!(audio.id(), missing_precision.id());
         }
 
-        let mut valid = sample_fixture().audio_file;
-        valid.bitrate = Some(u64::from(u32::MAX));
+        let mut valid = sample_fixture().audio_file().clone();
+        *valid.bitrate_mut() = Some(u64::from(u32::MAX));
 
         let audio = valid.build().unwrap();
 
         assert_eq!(audio.bitrate(), Some(u32::MAX));
-        assert_eq!(audio.id(), valid.id);
-        assert_eq!(audio.object_key(), valid.object_key);
-        assert_eq!(audio.playback_url(), &valid.playback_url);
+        assert_eq!(audio.id(), valid.id());
+        assert_eq!(audio.object_key(), valid.object_key());
+        assert_eq!(audio.playback_url(), valid.playback_url());
     }
 }

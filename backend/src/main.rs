@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = cmd::Cli::parse();
     observability::init_logging();
 
-    match cli.command {
+    match cli.command() {
         cmd::Command::Server(config) => cmd::server::run(config).await?,
         cmd::Command::Import(config) => cmd::import::run(config).await?,
     }

@@ -41,7 +41,7 @@ pub(crate) enum ServerError {
 }
 
 /// Builds the startup index and serves the configured API until shutdown.
-pub(crate) async fn run(config: ServerConfig) -> Result<(), ServerError> {
+pub(crate) async fn run(config: &ServerConfig) -> Result<(), ServerError> {
     config.validate()?;
     let cors_origin = config.cors_origin()?;
 

@@ -27,14 +27,28 @@ pub(crate) enum TrackValidationError {
 }
 
 /// Validated track metadata independent of stored audio identity and location.
-#[derive(Debug, Clone)]
+#[derive(getset::CopyGetters, getset::Getters, Debug, Clone)]
 pub(crate) struct TrackMetadata {
+    /// Identifies the track from its normalized release and track metadata.
+    #[getset(get = "pub(crate)")]
     id: TrackId,
+    /// Connects this track to the release used during identity generation.
+    #[getset(get = "pub(crate)")]
     release_id: ReleaseId,
+    /// Preserves the track title supplied by the source metadata.
+    #[getset(get = "pub(crate)")]
     title: String,
+    /// Provides the validated disc position for release ordering.
+    #[getset(get_copy = "pub(crate)")]
     disc_number: u32,
+    /// Provides the validated track position within its disc.
+    #[getset(get_copy = "pub(crate)")]
     track_number: u32,
+    /// Provides playback duration in milliseconds, including valid zero durations.
+    #[getset(get_copy = "pub(crate)")]
     duration_ms: Option<u32>,
+    /// Keeps track credits separate from release credits.
+    #[getset(get = "pub(crate)")]
     artist_credits: Vec<ArtistCredit>,
 }
 
@@ -77,47 +91,14 @@ impl TrackMetadata {
             artist_credits,
         })
     }
-
-    /// Identifies the track from its normalized release and track metadata.
-    pub(crate) fn id(&self) -> &TrackId {
-        &self.id
-    }
-
-    /// Connects this track to the release used during identity generation.
-    pub(crate) fn release_id(&self) -> &ReleaseId {
-        &self.release_id
-    }
-
-    /// Preserves the track title supplied by the source metadata.
-    pub(crate) fn title(&self) -> &str {
-        &self.title
-    }
-
-    /// Provides the validated disc position for release ordering.
-    pub(crate) fn disc_number(&self) -> u32 {
-        self.disc_number
-    }
-
-    /// Provides the validated track position within its disc.
-    pub(crate) fn track_number(&self) -> u32 {
-        self.track_number
-    }
-
-    /// Provides playback duration in milliseconds, including valid zero durations.
-    pub(crate) fn duration_ms(&self) -> Option<u32> {
-        self.duration_ms
-    }
-
-    /// Keeps track credits separate from release credits.
-    pub(crate) fn artist_credits(&self) -> &[ArtistCredit] {
-        &self.artist_credits
-    }
 }
 
 /// A release track associated with its stored original audio file.
-#[derive(Debug, Clone)]
+#[derive(getset::Getters, Debug, Clone)]
 pub(crate) struct Track {
     metadata: TrackMetadata,
+    /// Provides the original audio retained during index construction.
+    #[getset(get = "pub(crate)")]
     original_audio_file: AudioFile,
 }
 
@@ -164,11 +145,6 @@ impl Track {
     pub(crate) fn artist_credits(&self) -> &[ArtistCredit] {
         self.metadata.artist_credits()
     }
-
-    /// Provides the original audio retained during index construction.
-    pub(crate) fn original_audio_file(&self) -> &AudioFile {
-        &self.original_audio_file
-    }
 }
 
 /// Validates a positive disc or track number while ignoring an optional total.
@@ -194,16 +170,16 @@ mod tests {
         let mut fixture = sample_fixture();
         let release = fixture.build_release_metadata().unwrap();
 
-        fixture.disc_number = "001/2".into();
-        fixture.track_number = "002/12".into();
+        *fixture.disc_number_mut() = "001/2".into();
+        *fixture.track_number_mut() = "002/12".into();
 
         let (track, _) = fixture.build_track(release.id()).unwrap();
 
         assert_eq!(track.disc_number(), 1);
         assert_eq!(track.track_number(), 2);
 
-        fixture.disc_number = "1".into();
-        fixture.track_number = "2".into();
+        *fixture.disc_number_mut() = "1".into();
+        *fixture.track_number_mut() = "2".into();
 
         assert_eq!(
             track.id(),
@@ -215,8 +191,8 @@ mod tests {
                 let mut fixture = sample_fixture();
 
                 match field {
-                    "disc" => fixture.disc_number = invalid.into(),
-                    _ => fixture.track_number = invalid.into(),
+                    "disc" => *fixture.disc_number_mut() = invalid.into(),
+                    _ => *fixture.track_number_mut() = invalid.into(),
                 }
 
                 let error = fixture.build_track(release.id()).unwrap_err();
@@ -243,9 +219,9 @@ mod tests {
             let mut fixture = sample_fixture();
 
             match field {
-                "title" => fixture.track_title = " \t".into(),
-                "credits" => fixture.track_artists.names.clear(),
-                _ => fixture.track_artists.names = vec![" \t".into()],
+                "title" => *fixture.track_title_mut() = " \t".into(),
+                "credits" => fixture.track_artists_mut().names_mut().clear(),
+                _ => *fixture.track_artists_mut().names_mut() = vec![" \t".into()],
             }
 
             let error = fixture.build_track(release.id()).unwrap_err();
@@ -276,7 +252,7 @@ mod tests {
         let release = fixture.build_release_metadata().unwrap();
 
         for duration in [0, u128::from(u32::MAX)] {
-            fixture.duration_ms = Some(duration);
+            *fixture.duration_ms_mut() = Some(duration);
 
             let (track, _) = fixture.build_track(release.id()).unwrap();
 
@@ -284,12 +260,12 @@ mod tests {
         }
 
         let known_id = fixture.build_track(release.id()).unwrap().0.id().clone();
-        fixture.duration_ms = None;
+        *fixture.duration_ms_mut() = None;
         let unknown = fixture.build_track(release.id()).unwrap().0;
         assert!(unknown.duration_ms().is_none());
         assert_eq!(unknown.id(), &known_id);
 
-        fixture.duration_ms = Some(u128::from(u32::MAX) + 1);
+        *fixture.duration_ms_mut() = Some(u128::from(u32::MAX) + 1);
 
         assert!(matches!(
             fixture.build_track(release.id()),

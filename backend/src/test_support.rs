@@ -63,22 +63,43 @@ pub(crate) fn sample_release(source: &RawMetadata) -> Release {
 }
 
 /// Editable artist values used to exercise credit-validation boundaries.
-#[derive(Clone)]
+#[derive(Clone, getset::Getters, getset::MutGetters)]
 pub(crate) struct CreditFixture {
-    pub(crate) names: Vec<String>,
-    pub(crate) mbids: Vec<String>,
+    /// Artist spellings supplied to credit validation.
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    names: Vec<String>,
+    /// Artist identifiers supplied to credit validation.
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    mbids: Vec<String>,
 }
 
 /// Editable audio properties used to exercise required-value validation.
+#[derive(Clone, getset::Getters, getset::CopyGetters, getset::MutGetters)]
 pub(crate) struct AudioFixture {
-    pub(crate) id: AudioFileId,
-    pub(crate) object_key: String,
-    pub(crate) playback_url: url::Url,
-    pub(crate) sample_rate: u32,
-    pub(crate) bit_depth: Option<u32>,
-    pub(crate) media_type: &'static str,
-    pub(crate) channels: u32,
-    pub(crate) bitrate: Option<u64>,
+    /// Stored audio identity used by the fixture.
+    #[getset(get_copy = "pub(crate)", get_mut = "pub(crate)")]
+    id: AudioFileId,
+    /// Relative location of the stored audio fixture.
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    object_key: String,
+    /// Delivery endpoint of the stored audio fixture.
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    playback_url: url::Url,
+    /// Sampling frequency in hertz supplied to audio validation.
+    #[getset(get_copy = "pub(crate)", get_mut = "pub(crate)")]
+    sample_rate: u32,
+    /// Optional sample precision supplied to audio validation.
+    #[getset(get_copy = "pub(crate)", get_mut = "pub(crate)")]
+    bit_depth: Option<u32>,
+    /// Detected content type represented by the fixture.
+    #[getset(get_copy = "pub(crate)", get_mut = "pub(crate)")]
+    media_type: &'static str,
+    /// Channel count supplied to audio validation.
+    #[getset(get_copy = "pub(crate)", get_mut = "pub(crate)")]
+    channels: u32,
+    /// Optional bitrate in bits per second supplied to audio validation.
+    #[getset(get_copy = "pub(crate)", get_mut = "pub(crate)")]
+    bitrate: Option<u64>,
 }
 
 impl AudioFixture {
@@ -101,16 +122,35 @@ impl AudioFixture {
 }
 
 /// An editable copy of source metadata for domain and indexing regressions.
+#[derive(getset::Getters, getset::CopyGetters, getset::MutGetters)]
 pub(crate) struct MetadataFixture {
-    pub(crate) release_title: String,
-    pub(crate) release_date: String,
-    pub(crate) release_artists: CreditFixture,
-    pub(crate) track_title: String,
-    pub(crate) track_artists: CreditFixture,
-    pub(crate) disc_number: String,
-    pub(crate) track_number: String,
-    pub(crate) duration_ms: Option<u128>,
-    pub(crate) audio_file: AudioFixture,
+    /// Release spelling supplied to metadata validation.
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    release_title: String,
+    /// Partial or complete date supplied to release validation.
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    release_date: String,
+    /// Artist credit inputs associated with the release.
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    release_artists: CreditFixture,
+    /// Track spelling supplied to metadata validation.
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    track_title: String,
+    /// Artist credit inputs associated with the track.
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    track_artists: CreditFixture,
+    /// Raw disc position supplied to metadata validation.
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    disc_number: String,
+    /// Raw track position supplied to metadata validation.
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    track_number: String,
+    /// Optional playback duration in milliseconds supplied to track validation.
+    #[getset(get_copy = "pub(crate)", get_mut = "pub(crate)")]
+    duration_ms: Option<u128>,
+    /// Stored identity and playback inputs used to build audio.
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    audio_file: AudioFixture,
 }
 
 impl From<&RawMetadata> for MetadataFixture {
@@ -226,13 +266,13 @@ pub(crate) fn sample_audio_with_mbids(
     let mut tag = Tag::new(TagType::Id3v2);
 
     for (key, value) in [
-        (ItemKey::AlbumTitle, Some(source.release_title())),
-        (ItemKey::ReleaseDate, Some(source.release_date())),
+        (ItemKey::AlbumTitle, Some(source.release_title().as_str())),
+        (ItemKey::ReleaseDate, Some(source.release_date().as_str())),
         (ItemKey::MusicBrainzReleaseId, release_mbid),
-        (ItemKey::TrackTitle, Some(source.track_title())),
+        (ItemKey::TrackTitle, Some(source.track_title().as_str())),
         (ItemKey::MusicBrainzRecordingId, recording_mbid),
-        (ItemKey::DiscNumber, Some(source.disc_number())),
-        (ItemKey::TrackNumber, Some(source.track_number())),
+        (ItemKey::DiscNumber, Some(source.disc_number().as_str())),
+        (ItemKey::TrackNumber, Some(source.track_number().as_str())),
     ] {
         if let Some(value) = value.filter(|value| !value.is_empty()) {
             tag.insert_text(key, value.to_owned());

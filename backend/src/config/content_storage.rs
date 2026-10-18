@@ -15,7 +15,7 @@ use std::{path::Path, sync::Arc};
 pub(crate) struct ContentStorageConfig {
     /// Filesystem settings owned by the concrete storage adapter.
     #[command(flatten)]
-    pub(super) file_system: FileSystemContentStorageConfig,
+    file_system: FileSystemContentStorageConfig,
 }
 
 impl ContentStorageConfig {

@@ -9,10 +9,12 @@ use clap::{Parser, Subcommand};
 /// Command-line interface for backend operations.
 #[derive(Debug, Parser)]
 #[command(version, about)]
+#[derive(getset::Getters)]
 pub(crate) struct Cli {
     /// Selects the operation to execute.
     #[command(subcommand)]
-    pub(crate) command: Command,
+    #[getset(get = "pub(crate)")]
+    command: Command,
 }
 
 /// Supported backend operations.

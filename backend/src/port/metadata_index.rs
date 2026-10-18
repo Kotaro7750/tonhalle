@@ -8,8 +8,10 @@ use crate::domain::{
 };
 
 /// A release-list slice with an optional continuation token.
-#[derive(Debug, Clone)]
+#[derive(getset::Getters, Debug, Clone)]
 pub(crate) struct ReleasePage {
+    /// Exposes the release order chosen by the index.
+    #[getset(get = "pub(crate)")]
     items: Vec<Release>,
     next_cursor: Option<String>,
 }
@@ -18,11 +20,6 @@ impl ReleasePage {
     /// Collects a page and its optional continuation token.
     pub(crate) fn new(items: Vec<Release>, next_cursor: Option<String>) -> Self {
         Self { items, next_cursor }
-    }
-
-    /// Exposes the release order chosen by the index.
-    pub(crate) fn items(&self) -> &[Release] {
-        &self.items
     }
 
     /// Provides an opaque continuation token only when another page exists.

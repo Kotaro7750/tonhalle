@@ -36,10 +36,10 @@ fn import_music_preserves_bytes_issues_persistent_uuids_and_skips_existing_relea
     let destination = tempfile::tempdir().unwrap();
     let first = sample_fixture();
     let mut second = sample_fixture();
-    second.track_title = "Second track".into();
-    second.track_number = "2".into();
+    *second.track_title_mut() = "Second track".into();
+    *second.track_number_mut() = "2".into();
     let mut third = sample_fixture();
-    third.release_title = "Another release".into();
+    *third.release_title_mut() = "Another release".into();
     let originals = [
         sample_audio(&first.build()),
         sample_audio(&second.build()),
@@ -53,7 +53,10 @@ fn import_music_preserves_bytes_issues_persistent_uuids_and_skips_existing_relea
         Arc::new(FileSystemMusicStorage::for_import(destination.path().to_owned()).unwrap()),
     );
     let result = usecase.execute().unwrap();
-    assert_eq!((result.saved, result.skipped, result.failed), (2, 0, 0));
+    assert_eq!(
+        (result.saved(), result.skipped(), result.failed()),
+        (2, 0, 0)
+    );
     let releases = read_releases(destination.path());
     assert_eq!(releases.len(), 2);
     let mut identities = Vec::new();
@@ -72,7 +75,10 @@ fn import_music_preserves_bytes_issues_persistent_uuids_and_skips_existing_relea
     }
     assert_eq!(identities.len(), 3);
     let result = usecase.execute().unwrap();
-    assert_eq!((result.saved, result.skipped, result.failed), (0, 2, 0));
+    assert_eq!(
+        (result.saved(), result.skipped(), result.failed()),
+        (0, 2, 0)
+    );
     let after = read_releases(destination.path());
     let after_ids: Vec<_> = after
         .iter()
@@ -91,7 +97,7 @@ fn import_music_continues_after_read_validation_and_save_failures_and_can_retry(
     let source = tempfile::tempdir().unwrap();
     let destination = tempfile::tempdir().unwrap();
     let mut blocked = sample_fixture();
-    blocked.release_title = "Blocked".into();
+    *blocked.release_title_mut() = "Blocked".into();
     let blocked_bytes = sample_audio(&blocked.build());
     let blocked_release = ImportRelease::new(vec![blocked_bytes.clone()]).unwrap();
     let collision = destination.path().join(blocked_release.id().as_ref());
@@ -115,9 +121,15 @@ fn import_music_continues_after_read_validation_and_save_failures_and_can_retry(
     );
     let result = usecase.execute().unwrap();
     #[cfg(unix)]
-    assert_eq!((result.saved, result.skipped, result.failed), (0, 0, 4));
+    assert_eq!(
+        (result.saved(), result.skipped(), result.failed()),
+        (0, 0, 4)
+    );
     #[cfg(not(unix))]
-    assert_eq!((result.saved, result.skipped, result.failed), (1, 0, 3));
+    assert_eq!(
+        (result.saved(), result.skipped(), result.failed()),
+        (1, 0, 3)
+    );
     assert_eq!(fs::read(&collision).unwrap(), b"must not be overwritten");
     assert!(read_releases(destination.path()).len() <= 1);
 
@@ -127,7 +139,10 @@ fn import_music_continues_after_read_validation_and_save_failures_and_can_retry(
     #[cfg(unix)]
     fs::remove_file(source.path().join("d-success/broken.wav")).unwrap();
     let result = usecase.execute().unwrap();
-    assert_eq!((result.saved, result.skipped, result.failed), (2, 1, 0));
+    assert_eq!(
+        (result.saved(), result.skipped(), result.failed()),
+        (2, 1, 0)
+    );
     assert_eq!(read_releases(destination.path()).len(), 2);
 }
 

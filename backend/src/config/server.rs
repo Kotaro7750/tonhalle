@@ -23,7 +23,7 @@ pub(crate) enum CorsOriginError {
 }
 
 /// Server settings parsed from CLI arguments or the TONHALLE environment namespace.
-#[derive(Debug, Args)]
+#[derive(getset::Getters, Debug, Args)]
 pub(crate) struct ServerConfig {
     /// IP interface used by the HTTP listener.
     #[arg(
@@ -44,6 +44,7 @@ pub(crate) struct ServerConfig {
     cors_origin: Option<String>,
     /// Audio storage and playback delivery settings.
     #[command(flatten)]
+    #[getset(get = "pub(crate)")]
     content_storage: ContentStorageConfig,
 }
 
@@ -67,11 +68,6 @@ impl ServerConfig {
         self.cors_origin()?;
         self.content_storage.validate_playback_url()?;
         Ok(())
-    }
-
-    /// Exposes the settings used to construct music storage.
-    pub(crate) fn content_storage(&self) -> &ContentStorageConfig {
-        &self.content_storage
     }
 
     /// Combines the configured IP and port for listener binding.
@@ -103,29 +99,42 @@ impl ServerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use clap::Parser;
 
-    /// Constructs settings without invoking command-line or environment parsing.
+    /// Constructs server settings with a valid playback endpoint.
     fn config(origin: Option<&str>) -> ServerConfig {
+        config_with_playback_url(origin, Some("http://localhost:8000/"))
+    }
+
+    /// Parses adapter settings without accessing their private fields.
+    fn config_with_playback_url(origin: Option<&str>, url: Option<&str>) -> ServerConfig {
         ServerConfig {
             listen_address: IpAddr::from([127, 0, 0, 1]),
             listen_port: 3000,
             cors_origin: origin.map(str::to_owned),
-            content_storage: ContentStorageConfig {
-                file_system: crate::infrastructure::music_storage::filesystem::FileSystemContentStorageConfig {
-                    root_path: PathBuf::from("../sample"),
-                    playback_url_base: Some(Url::parse("http://localhost:8000/").unwrap()),
-                },
+            content_storage: {
+                /// Parses shared storage arguments for configuration tests.
+                #[derive(Parser)]
+                struct Settings {
+                    /// Holds the adapter settings under validation.
+                    #[command(flatten)]
+                    storage: ContentStorageConfig,
+                }
+                let mut args = vec!["test", "--content-storage--root-path", "../sample"];
+                if let Some(url) = url {
+                    args.extend(["--content-storage--playback-url-base", url]);
+                }
+                Settings::try_parse_from(args).unwrap().storage
             },
         }
     }
 
     #[test]
     fn server_config_validate_requires_a_valid_storage_playback_url() {
-        let mut settings = config(None);
+        let settings = config(None);
         assert!(settings.validate().is_ok());
 
-        settings.content_storage.file_system.playback_url_base = None;
+        let settings = config_with_playback_url(None, None);
         assert!(matches!(settings.validate(), Err(ServerConfigError::Storage(
             crate::infrastructure::music_storage::filesystem::FileSystemStorageConstructionError::MissingPlaybackUrlBase
         ))));
@@ -135,7 +144,7 @@ mod tests {
             "https://example.com/?token=value",
             "https://example.com/#fragment",
         ] {
-            settings.content_storage.file_system.playback_url_base = Some(Url::parse(url).unwrap());
+            let settings = config_with_playback_url(None, Some(url));
             assert!(matches!(settings.validate(), Err(ServerConfigError::Storage(
                 crate::infrastructure::music_storage::filesystem::FileSystemStorageConstructionError::InvalidPlaybackUrlBase
             ))));

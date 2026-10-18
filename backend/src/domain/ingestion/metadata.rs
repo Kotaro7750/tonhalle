@@ -11,120 +11,66 @@ use lofty::{
 };
 
 /// Embedded tags and audio properties awaiting domain validation.
-#[derive(Debug, Clone)]
+#[derive(getset::Getters, Debug, Clone)]
 pub(crate) struct RawMetadata {
+    /// Preserves source spelling before release identity normalization.
+    #[getset(get = "pub(crate)")]
     release_title: String,
+    /// Preserves date precision for release validation.
+    #[getset(get = "pub(crate)")]
     release_date: String,
+    /// Provides the unvalidated release artist names and MBIDs.
+    #[getset(get = "pub(crate)")]
     release_credit: RawCreditMetadata,
+    /// Preserves source spelling before track identity normalization.
+    #[getset(get = "pub(crate)")]
     track_title: String,
+    /// Provides the unvalidated track artist names and MBIDs.
+    #[getset(get = "pub(crate)")]
     track_credit: RawCreditMetadata,
+    /// Preserves raw disc notation for positive-number validation.
+    #[getset(get = "pub(crate)")]
     disc_number: String,
+    /// Preserves raw track notation for positive-number validation.
+    #[getset(get = "pub(crate)")]
     track_number: String,
+    /// Provides the extracted technical information before entity construction.
+    #[getset(get = "pub(crate)")]
     audio: RawAudioMetadata,
 }
 
-impl RawMetadata {
-    /// Preserves source spelling before release identity normalization.
-    pub(crate) fn release_title(&self) -> &str {
-        &self.release_title
-    }
-
-    /// Preserves date precision for release validation.
-    pub(crate) fn release_date(&self) -> &str {
-        &self.release_date
-    }
-
-    /// Provides the unvalidated release artist names and MBIDs.
-    pub(crate) fn release_credit(&self) -> &RawCreditMetadata {
-        &self.release_credit
-    }
-
-    /// Preserves source spelling before track identity normalization.
-    pub(crate) fn track_title(&self) -> &str {
-        &self.track_title
-    }
-
-    /// Provides the unvalidated track artist names and MBIDs.
-    pub(crate) fn track_credit(&self) -> &RawCreditMetadata {
-        &self.track_credit
-    }
-
-    /// Preserves raw disc notation for positive-number validation.
-    pub(crate) fn disc_number(&self) -> &str {
-        &self.disc_number
-    }
-
-    /// Preserves raw track notation for positive-number validation.
-    pub(crate) fn track_number(&self) -> &str {
-        &self.track_number
-    }
-
-    /// Provides the extracted technical information before entity construction.
-    pub(crate) fn audio(&self) -> &RawAudioMetadata {
-        &self.audio
-    }
-}
-
 /// Artist name and MBID lists whose correspondence has not yet been validated.
-#[derive(Debug, Clone)]
+#[derive(getset::Getters, Debug, Clone)]
 pub(crate) struct RawCreditMetadata {
+    /// Preserves explicit artist name boundaries and source spelling.
+    #[getset(get = "pub(crate)")]
     names: Vec<String>,
+    /// Preserves raw MBID order for later name correspondence.
+    #[getset(get = "pub(crate)")]
     mbids: Vec<String>,
 }
 
-impl RawCreditMetadata {
-    /// Preserves explicit artist name boundaries and source spelling.
-    pub(crate) fn names(&self) -> &[String] {
-        &self.names
-    }
-
-    /// Preserves raw MBID order for later name correspondence.
-    pub(crate) fn mbids(&self) -> &[String] {
-        &self.mbids
-    }
-}
-
 /// Audio properties and container identity awaiting domain validation.
-#[derive(Debug, Clone)]
+#[derive(getset::CopyGetters, Debug, Clone)]
 pub(crate) struct RawAudioMetadata {
-    duration_ms: Option<u128>,
-    sample_rate: u32,
-    bit_depth: Option<u32>,
-    media_type: &'static str,
-    channels: u32,
-    bitrate: Option<u64>,
-}
-
-impl RawAudioMetadata {
     /// Provides the measured playback duration before track construction.
-    pub(crate) fn duration_ms(&self) -> Option<u128> {
-        self.duration_ms
-    }
-
+    #[getset(get_copy = "pub(crate)")]
+    duration_ms: Option<u128>,
     /// Provides the sampling frequency in hertz reported by the audio format.
-    pub(crate) fn sample_rate(&self) -> u32 {
-        self.sample_rate
-    }
-
+    #[getset(get_copy = "pub(crate)")]
+    sample_rate: u32,
     /// Provides the number of bits used for each audio sample when available.
-    pub(crate) fn bit_depth(&self) -> Option<u32> {
-        self.bit_depth
-    }
-
+    #[getset(get_copy = "pub(crate)")]
+    bit_depth: Option<u32>,
     /// Provides the content type detected from audio bytes.
-    pub(crate) fn media_type(&self) -> &'static str {
-        self.media_type
-    }
-
+    #[getset(get_copy = "pub(crate)")]
+    media_type: &'static str,
     /// Provides the channel count reported by the audio format.
-    pub(crate) fn channels(&self) -> u32 {
-        self.channels
-    }
-
+    #[getset(get_copy = "pub(crate)")]
+    channels: u32,
     /// Provides the audio bitrate in bits per second when available.
-    pub(crate) fn bitrate(&self) -> Option<u64> {
-        self.bitrate
-    }
+    #[getset(get_copy = "pub(crate)")]
+    bitrate: Option<u64>,
 }
 
 /// A failure to extract embedded metadata and playback properties from audio bytes.
@@ -245,26 +191,26 @@ mod tests {
         /// Builds raw metadata directly from editable test values.
         fn from(fixture: &MetadataFixture) -> Self {
             Self {
-                release_title: fixture.release_title.clone(),
-                release_date: fixture.release_date.clone(),
+                release_title: fixture.release_title().clone(),
+                release_date: fixture.release_date().clone(),
                 release_credit: RawCreditMetadata {
-                    names: fixture.release_artists.names.clone(),
-                    mbids: fixture.release_artists.mbids.clone(),
+                    names: fixture.release_artists().names().clone(),
+                    mbids: fixture.release_artists().mbids().clone(),
                 },
-                track_title: fixture.track_title.clone(),
+                track_title: fixture.track_title().clone(),
                 track_credit: RawCreditMetadata {
-                    names: fixture.track_artists.names.clone(),
-                    mbids: fixture.track_artists.mbids.clone(),
+                    names: fixture.track_artists().names().clone(),
+                    mbids: fixture.track_artists().mbids().clone(),
                 },
-                disc_number: fixture.disc_number.clone(),
-                track_number: fixture.track_number.clone(),
+                disc_number: fixture.disc_number().clone(),
+                track_number: fixture.track_number().clone(),
                 audio: RawAudioMetadata {
-                    duration_ms: fixture.duration_ms,
-                    sample_rate: fixture.audio_file.sample_rate,
-                    bit_depth: fixture.audio_file.bit_depth,
-                    media_type: fixture.audio_file.media_type,
-                    channels: fixture.audio_file.channels,
-                    bitrate: fixture.audio_file.bitrate,
+                    duration_ms: fixture.duration_ms(),
+                    sample_rate: fixture.audio_file().sample_rate(),
+                    bit_depth: fixture.audio_file().bit_depth(),
+                    media_type: fixture.audio_file().media_type(),
+                    channels: fixture.audio_file().channels(),
+                    bitrate: fixture.audio_file().bitrate(),
                 },
             }
         }
@@ -274,17 +220,18 @@ mod tests {
     fn extract_metadata_preserves_missing_and_invalid_metadata_without_validation() {
         let source = sample_metadata();
         let mut invalid = MetadataFixture::from(&source);
-        invalid.release_title.clear();
-        invalid.release_date = "2026-02-29".into();
-        invalid.release_artists.names.clear();
-        invalid.release_artists.mbids = vec!["7b0857ed-11ee-4426-9899-16f4e415322f".into()];
-        invalid.track_title = " \t".into();
-        invalid.track_artists.names = vec![" One ".into(), "Two".into()];
-        invalid.track_artists.mbids = vec![
+        invalid.release_title_mut().clear();
+        *invalid.release_date_mut() = "2026-02-29".into();
+        invalid.release_artists_mut().names_mut().clear();
+        *invalid.release_artists_mut().mbids_mut() =
+            vec!["7b0857ed-11ee-4426-9899-16f4e415322f".into()];
+        *invalid.track_title_mut() = " \t".into();
+        *invalid.track_artists_mut().names_mut() = vec![" One ".into(), "Two".into()];
+        *invalid.track_artists_mut().mbids_mut() = vec![
             "f7b87070-d876-4a11-997a-048cdff1a87d".into(),
             "7b0857ed-11ee-4426-9899-16f4e415322f".into(),
         ];
-        invalid.disc_number = "0".into();
+        *invalid.disc_number_mut() = "0".into();
 
         let audio = sample_audio(&invalid.build());
         let extracted = extract_metadata(&audio).unwrap();
@@ -294,16 +241,16 @@ mod tests {
         assert!(extracted.release_credit().names().is_empty());
         assert_eq!(
             extracted.release_credit().mbids(),
-            invalid.release_artists.mbids
+            invalid.release_artists().mbids()
         );
         assert_eq!(extracted.track_title(), " \t");
         assert_eq!(
             extracted.track_credit().names(),
-            invalid.track_artists.names
+            invalid.track_artists().names()
         );
         assert_eq!(
             extracted.track_credit().mbids(),
-            invalid.track_artists.mbids
+            invalid.track_artists().mbids()
         );
         assert_eq!(extracted.disc_number(), "0");
     }
@@ -314,7 +261,7 @@ mod tests {
 
         for (stored_bitrate, expected_bitrate) in [(1_411_200, 1_411_200), (2_116_800, 2_117_000)] {
             let mut fixture = MetadataFixture::from(&source);
-            fixture.audio_file.bitrate = Some(stored_bitrate);
+            *fixture.audio_file_mut().bitrate_mut() = Some(stored_bitrate);
 
             let extracted = extract_metadata(&sample_audio(&fixture.build())).unwrap();
 

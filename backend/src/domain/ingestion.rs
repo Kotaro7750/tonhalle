@@ -61,11 +61,18 @@ pub(crate) fn ingest_track(
 /// Validated embedded metadata and audio properties without stored entities.
 pub(crate) struct ParsedAudio {
     /// Describes the track and its metadata-derived identity.
-    pub(crate) track_metadata: TrackMetadata,
+    track_metadata: TrackMetadata,
     /// Describes the release identified by the embedded tags.
-    pub(crate) release_metadata: ReleaseMetadata,
+    release_metadata: ReleaseMetadata,
     /// Describes audio independently of its storage location.
-    pub(crate) properties: AudioProperties,
+    properties: AudioProperties,
+}
+
+impl ParsedAudio {
+    /// Transfers validated track metadata, release metadata, and audio properties to their owner.
+    pub(crate) fn into_parts(self) -> (TrackMetadata, ReleaseMetadata, AudioProperties) {
+        (self.track_metadata, self.release_metadata, self.properties)
+    }
 }
 
 /// Extracts and validates audio without requiring stored identity or playback links.
@@ -124,15 +131,15 @@ mod tests {
             let mut invalid = MetadataFixture::from(&source);
 
             match field {
-                0 => invalid.release_title.clear(),
-                1 => invalid.release_date = "2026-02-29".into(),
-                2 => invalid.release_artists.names.clear(),
-                3 => invalid.track_title = "\t\n".into(),
-                4 => invalid.track_artists.names.clear(),
-                5 => invalid.track_number = "0".into(),
-                6 => invalid.audio_file.sample_rate = 0,
-                7 => invalid.audio_file.bit_depth = Some(0),
-                8 => invalid.audio_file.channels = 0,
+                0 => invalid.release_title_mut().clear(),
+                1 => *invalid.release_date_mut() = "2026-02-29".into(),
+                2 => invalid.release_artists_mut().names_mut().clear(),
+                3 => *invalid.track_title_mut() = "\t\n".into(),
+                4 => invalid.track_artists_mut().names_mut().clear(),
+                5 => *invalid.track_number_mut() = "0".into(),
+                6 => *invalid.audio_file_mut().sample_rate_mut() = 0,
+                7 => *invalid.audio_file_mut().bit_depth_mut() = Some(0),
+                8 => *invalid.audio_file_mut().channels_mut() = 0,
                 _ => unreachable!(),
             }
 
@@ -150,13 +157,13 @@ mod tests {
 
         let source = sample_metadata();
         let release_id = release_metadata(&source).unwrap().id().clone();
-        let storage = MetadataFixture::from(&source).audio_file;
+        let storage = MetadataFixture::from(&source).audio_file().clone();
         let parse = |bytes: &[u8]| {
             ingest_track(
                 bytes,
-                storage.id,
-                storage.object_key.clone(),
-                storage.playback_url.clone(),
+                storage.id(),
+                storage.object_key().clone(),
+                storage.playback_url().clone(),
                 &release_id,
             )
         };
@@ -173,7 +180,7 @@ mod tests {
         assert_eq!(plain.1, tagged.1);
 
         let mut changed = MetadataFixture::from(&source);
-        changed.track_title.push_str(" Revised");
+        changed.track_title_mut().push_str(" Revised");
 
         let changed_track = parse(&sample_audio_with_mbids(
             &changed.build(),
@@ -184,7 +191,7 @@ mod tests {
 
         assert_ne!(plain.0.id(), changed_track.0.id());
 
-        changed.release_title.push_str(" Revised");
+        changed.release_title_mut().push_str(" Revised");
         let actual = release_metadata(&changed.build()).unwrap().id().clone();
 
         assert!(matches!(
@@ -207,12 +214,15 @@ mod tests {
 
         let mut changed = MetadataFixture::from(&source);
 
-        changed.release_title.push_str(" Revised");
+        changed.release_title_mut().push_str(" Revised");
 
         let second = release_metadata(&changed.build()).unwrap();
         let (updated, _) = changed.ingest_track(second.id()).unwrap();
 
         assert_ne!(original.id(), updated.id());
-        assert_eq!(updated.original_audio_file().id(), changed.audio_file.id);
+        assert_eq!(
+            updated.original_audio_file().id(),
+            changed.audio_file().id()
+        );
     }
 }

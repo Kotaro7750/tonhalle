@@ -133,7 +133,7 @@ impl FileSystemImportSource {
         }
         Ok(groups
             .into_iter()
-            .map(|(key, audio_keys)| ImportCandidate { key, audio_keys })
+            .map(|(key, audio_keys)| ImportCandidate::new(key, audio_keys))
             .collect())
     }
 }

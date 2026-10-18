@@ -36,7 +36,7 @@ pub(crate) enum FileSystemContentStorageConstructionError {
 }
 
 /// CLI settings and construction rules shared by filesystem music-storage consumers.
-#[derive(Debug, clap::Args)]
+#[derive(getset::Getters, Debug, clap::Args)]
 pub(crate) struct FileSystemContentStorageConfig {
     /// Existing directory holding stored audio releases.
     #[arg(
@@ -44,22 +44,19 @@ pub(crate) struct FileSystemContentStorageConfig {
         long = "content-storage--root-path",
         env = "TONHALLE_CONTENT_STORAGE__ROOT_PATH"
     )]
-    pub(crate) root_path: PathBuf,
+    /// Provides the filesystem destination for adapter-specific compatibility checks.
+    #[getset(get = "pub(crate)")]
+    root_path: PathBuf,
     /// Optional delivery endpoint used when reading stored releases.
     #[arg(
         id = "content_storage_playback_url_base",
         long = "content-storage--playback-url-base",
         env = "TONHALLE_CONTENT_STORAGE__PLAYBACK_URL_BASE"
     )]
-    pub(crate) playback_url_base: Option<Url>,
+    playback_url_base: Option<Url>,
 }
 
 impl FileSystemContentStorageConfig {
-    /// Provides the filesystem destination for adapter-specific compatibility checks.
-    pub(crate) fn root_path(&self) -> &Path {
-        &self.root_path
-    }
-
     /// Requires a valid delivery endpoint for operations that read playable releases.
     pub(crate) fn validate_playback_url(&self) -> Result<(), FileSystemStorageConstructionError> {
         let mut url = self
@@ -515,7 +512,7 @@ mod tests {
 
         std::fs::create_dir_all(&directory).unwrap();
 
-        let path = directory.join(format!("{}.wav", source.audio_file.id));
+        let path = directory.join(format!("{}.wav", source.audio_file().id()));
         std::fs::write(&path, sample_audio(&raw)).unwrap();
 
         path
@@ -541,7 +538,7 @@ mod tests {
 
             let audio = release.tracks()[0].original_audio_file();
 
-            assert_eq!(audio.id(), MetadataFixture::from(&source).audio_file.id);
+            assert_eq!(audio.id(), MetadataFixture::from(&source).audio_file().id());
             assert_eq!(
                 audio.playback_url().as_str(),
                 format!(
@@ -585,11 +582,12 @@ mod tests {
         .unwrap();
 
         let mut different = MetadataFixture::from(&source);
-        different.release_title.push_str(" Other");
-        different.audio_file.id = "925eda40-54cb-4af4-9579-6811fc7477ac".parse().unwrap();
+        different.release_title_mut().push_str(" Other");
+        *different.audio_file_mut().id_mut() =
+            "925eda40-54cb-4af4-9579-6811fc7477ac".parse().unwrap();
 
         std::fs::write(
-            directory.join(format!("{}.wav", different.audio_file.id)),
+            directory.join(format!("{}.wav", different.audio_file().id())),
             sample_audio(&different.build()),
         )
         .unwrap();
@@ -638,8 +636,9 @@ mod tests {
         write_audio(temp.path(), &MetadataFixture::from(&source));
 
         let mut duplicate = MetadataFixture::from(&source);
-        duplicate.release_title.push(' ');
-        duplicate.audio_file.id = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
+        duplicate.release_title_mut().push(' ');
+        *duplicate.audio_file_mut().id_mut() =
+            "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
 
         write_audio(temp.path(), &duplicate);
 
@@ -682,8 +681,8 @@ mod tests {
         write_audio(&temp.path().join("a"), &MetadataFixture::from(&source));
 
         let mut other = MetadataFixture::from(&source);
-        other.track_number = "2".into();
-        other.audio_file.id = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
+        *other.track_number_mut() = "2".into();
+        *other.audio_file_mut().id_mut() = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
 
         let second_path = write_audio(&temp.path().join("b"), &other);
 
