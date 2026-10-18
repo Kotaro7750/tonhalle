@@ -1,5 +1,9 @@
 //! Parses backend commands and dispatches their startup handlers.
 
+use clap::Parser;
+
+use crate::cmd::{import::run as run_import, server::run as run_server};
+
 mod cmd;
 mod config;
 mod controller;
@@ -9,8 +13,6 @@ mod observability;
 mod port;
 mod usecase;
 
-use clap::Parser;
-
 /// Parses the selected command and runs it until completion.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -18,8 +20,8 @@ async fn main() -> anyhow::Result<()> {
     observability::init_logging();
 
     match cli.command() {
-        cmd::Command::Server(config) => cmd::server::run(config).await?,
-        cmd::Command::Import(config) => cmd::import::run(config).await?,
+        cmd::Command::Server(config) => run_server(config).await?,
+        cmd::Command::Import(config) => run_import(config).await?,
     }
     Ok(())
 }

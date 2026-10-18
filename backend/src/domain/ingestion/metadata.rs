@@ -1,16 +1,16 @@
 //! Extracts unvalidated embedded tags and audio properties from stored audio bytes.
 
-use std::io::Cursor;
-
-use crate::domain::primitive::audio_file::MediaType;
-
 use lofty::{
     config::ParseOptions,
+    error::FileParseError,
     file::{AudioFile as _, FileType, TaggedFile, TaggedFileExt},
     iff::wav::{WavFile, WavFormat, WavProperties},
     probe::Probe,
     tag::ItemKey,
 };
+use std::io::{Cursor, Error as IoError};
+
+use crate::domain::primitive::audio_file::MediaType;
 
 /// Embedded tags and audio properties awaiting domain validation.
 #[derive(getset::Getters, Debug, Clone)]
@@ -80,13 +80,13 @@ pub(crate) struct RawAudioMetadata {
 pub(crate) enum ExtractMetadataError {
     /// The container cannot supply readable metadata.
     #[error("reading audio: {0}")]
-    Parse(#[source] lofty::error::FileParseError),
+    Parse(#[source] FileParseError),
     /// The detected container is not a supported playback format.
     #[error("unsupported audio format: {0:?}")]
     Unsupported(FileType),
     /// Format detection could not read the audio bytes.
     #[error("detecting audio format: {0}")]
-    Detect(#[source] std::io::Error),
+    Detect(#[source] IoError),
 }
 
 /// Extracts embedded metadata from audio bytes without accessing physical storage.

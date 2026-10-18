@@ -1,6 +1,15 @@
 //! Verifies music browsing and pagination through HTTP requests.
 
+use std::{
+    collections::BTreeSet,
+    fs::{create_dir, read, write},
+};
+
 use super::*;
+use crate::{
+    port::music_storage::MusicStorage,
+    test_support::{MetadataFixture, sample_metadata, sample_release},
+};
 
 #[tokio::test]
 async fn music_api_reads_sample_audio_in_the_contract_format() {
@@ -16,7 +25,7 @@ async fn music_api_reads_sample_audio_in_the_contract_format() {
         .iter()
         .flat_map(|release| release["tracks"].as_array().unwrap())
         .map(|track| track["audio_properties"]["media_type"].as_str().unwrap())
-        .collect::<std::collections::BTreeSet<_>>();
+        .collect::<BTreeSet<_>>();
     assert_eq!(
         formats,
         [
@@ -188,12 +197,11 @@ async fn list_releases_paginates_without_duplicates_when_limit_changes() {
 #[tokio::test]
 async fn list_releases_defaults_to_thirty_and_rejects_unknown_cursor_positions() {
     let make_release = |i| {
-        let mut source =
-            crate::test_support::MetadataFixture::from(&crate::test_support::sample_metadata());
+        let mut source = MetadataFixture::from(&sample_metadata());
 
         *source.release_title_mut() = format!("Pagination Release {i}");
 
-        crate::test_support::sample_release(&source.build())
+        sample_release(&source.build())
     };
 
     let app = router(Arc::new(InMemoryMetadataIndex::new(
@@ -245,12 +253,13 @@ async fn list_releases_returns_an_empty_page_without_a_cursor() {
 
 #[tokio::test]
 async fn music_api_indexes_supported_formats_with_detected_types_and_optional_bit_depth() {
-    use crate::test_support::sample_fixture;
     use lofty::{
         config::WriteOptions,
         file::FileType,
         tag::{ItemKey, ItemValue, Tag, TagExt, TagItem},
     };
+
+    use crate::test_support::sample_fixture;
 
     let fixture = sample_fixture();
     let release_id = fixture.build_release_metadata().unwrap().id().clone();
@@ -300,13 +309,13 @@ async fn music_api_indexes_supported_formats_with_detected_types_and_optional_bi
     ] {
         let root = tempfile::tempdir().unwrap();
         let directory = root.path().join(release_id.to_string());
-        std::fs::create_dir(&directory).unwrap();
+        create_dir(&directory).unwrap();
         let path = directory.join(format!(
             "{}.{}",
             fixture.audio_file().id(),
             extension.to_uppercase()
         ));
-        std::fs::write(&path, bytes).unwrap();
+        write(&path, bytes).unwrap();
         let mut tag = Tag::new(FileType::from_ext(extension).unwrap().primary_tag_type());
         for (key, value) in [
             (ItemKey::AlbumTitle, fixture.release_title().as_str()),
@@ -372,12 +381,12 @@ async fn music_api_indexes_supported_formats_with_detected_types_and_optional_bi
 
         if extension == "flac" {
             // FLAC permits an unknown total sample count in STREAMINFO.
-            let mut bytes = std::fs::read(&path).unwrap();
+            let mut bytes = read(&path).unwrap();
             assert_eq!(&bytes[..4], b"fLaC");
             assert_eq!(bytes[4] & 0x7f, 0);
             bytes[21] &= 0xf0;
             bytes[22..26].fill(0);
-            std::fs::write(&path, bytes).unwrap();
+            write(&path, bytes).unwrap();
             let storage = FileSystemMusicStorage::new(
                 root.path().to_owned(),
                 "https://media.example.com/".parse().unwrap(),
@@ -400,7 +409,7 @@ async fn music_api_indexes_supported_formats_with_detected_types_and_optional_bi
         }
 
         // A corrupt newly supported file invalidates its whole release rather than disappearing from the scan.
-        std::fs::write(
+        write(
             directory.join(format!("229fc612-8a56-45d0-bf61-55b36ff3dcba.{extension}")),
             b"corrupt",
         )
@@ -410,7 +419,7 @@ async fn music_api_indexes_supported_formats_with_detected_types_and_optional_bi
             "https://media.example.com/".parse().unwrap(),
         )
         .unwrap();
-        let scanned = crate::port::music_storage::MusicStorage::scan_releases(&storage).unwrap();
+        let scanned = MusicStorage::scan_releases(&storage).unwrap();
         assert_eq!(scanned.len(), 1);
         assert!(scanned[0].is_err(), "{extension}");
     }

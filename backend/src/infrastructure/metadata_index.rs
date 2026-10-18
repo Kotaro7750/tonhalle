@@ -1,16 +1,15 @@
 //! Stores the startup music index and implements cursor-based browsing.
 
+use async_trait::async_trait;
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use std::{
     collections::BTreeMap,
     ops::Bound::{Excluded, Unbounded},
 };
 
-use async_trait::async_trait;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-
 use crate::{
     domain::{
-        ReleaseId, TrackId,
+        id::{ReleaseId, TrackId},
         primitive::{release::Release, track::Track},
     },
     port::metadata_index::{

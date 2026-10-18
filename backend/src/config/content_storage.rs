@@ -1,5 +1,8 @@
 //! Defines shared stored-audio configuration independently of the consuming command.
 
+use clap::Args;
+use std::{path::Path, sync::Arc};
+
 use crate::{
     infrastructure::music_storage::filesystem::{
         FileSystemContentStorageConfig, FileSystemContentStorageConstructionError,
@@ -7,8 +10,6 @@ use crate::{
     },
     port::music_storage::MusicStorage,
 };
-use clap::Args;
-use std::{path::Path, sync::Arc};
 
 /// Settings selecting and constructing content storage for servers and imports.
 #[derive(Debug, Args)]

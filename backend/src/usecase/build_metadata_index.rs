@@ -49,9 +49,16 @@ impl BuildMetadataIndexUseCase {
 /// Verifies scan orchestration and propagation of fatal failures.
 #[cfg(test)]
 mod tests {
+    use std::{
+        error,
+        io::{Error as IoError, ErrorKind},
+        iter::successors,
+    };
+
     use super::*;
     use crate::{
-        port::music_storage::ReleaseScanFailure,
+        domain::{id::ReleaseId, import::ImportRelease},
+        port::music_storage::{ReleaseScanFailure, SaveReleaseError, SaveReleaseOutcome},
         test_support::{sample_metadata, sample_release},
     };
 
@@ -60,13 +67,7 @@ mod tests {
 
     impl MusicStorage for UnavailableStorage {
         /// Index-only fixtures must never receive writes.
-        fn save_release(
-            &self,
-            _: &crate::domain::import::ImportRelease,
-        ) -> Result<
-            crate::port::music_storage::SaveReleaseOutcome,
-            crate::port::music_storage::SaveReleaseError,
-        > {
+        fn save_release(&self, _: &ImportRelease) -> Result<SaveReleaseOutcome, SaveReleaseError> {
             panic!("index construction must not write music storage")
         }
 
@@ -74,8 +75,8 @@ mod tests {
         fn scan_releases(
             &self,
         ) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError> {
-            Err(ScanReleasesError::new(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
+            Err(ScanReleasesError::new(IoError::new(
+                ErrorKind::PermissionDenied,
                 "content directory is not readable",
             )))
         }
@@ -86,13 +87,7 @@ mod tests {
 
     impl MusicStorage for FixtureStorage {
         /// Index-only fixtures must never receive writes.
-        fn save_release(
-            &self,
-            _: &crate::domain::import::ImportRelease,
-        ) -> Result<
-            crate::port::music_storage::SaveReleaseOutcome,
-            crate::port::music_storage::SaveReleaseError,
-        > {
+        fn save_release(&self, _: &ImportRelease) -> Result<SaveReleaseOutcome, SaveReleaseError> {
             panic!("index construction must not write music storage")
         }
 
@@ -104,9 +99,7 @@ mod tests {
 
             results.push(Err(ReleaseScanFailure::InvalidId {
                 object_key: "invalid-release".into(),
-                source: "invalid-release"
-                    .parse::<crate::domain::ReleaseId>()
-                    .unwrap_err(),
+                source: "invalid-release".parse::<ReleaseId>().unwrap_err(),
             }));
 
             Ok(results)
@@ -120,11 +113,11 @@ mod tests {
             .unwrap_err();
 
         assert!(
-            std::iter::successors(Some(&error as &dyn std::error::Error), |cause| cause
-                .source())
-            .any(|cause| cause
-                .downcast_ref::<std::io::Error>()
-                .is_some_and(|cause| cause.kind() == std::io::ErrorKind::PermissionDenied))
+            successors(Some(&error as &dyn error::Error), |cause| cause.source()).any(|cause| {
+                cause
+                    .downcast_ref::<IoError>()
+                    .is_some_and(|cause| cause.kind() == ErrorKind::PermissionDenied)
+            })
         );
     }
 

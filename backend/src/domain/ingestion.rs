@@ -1,11 +1,10 @@
 //! Composes audio extraction and validated entity construction for storage adapters.
 
-pub(crate) mod metadata;
-
+use metadata::ExtractMetadataError;
 use url::Url;
 
 use crate::domain::{
-    AudioFileId, ReleaseId,
+    id::{AudioFileId, ReleaseId},
     primitive::{
         audio_file::{AudioFile, AudioFileValidationError, AudioProperties},
         release::{
@@ -14,7 +13,8 @@ use crate::domain::{
         track::{Track, TrackMetadata, TrackValidationError},
     },
 };
-use metadata::ExtractMetadataError;
+
+pub(crate) mod metadata;
 
 /// A failure to ingest a track or establish its membership in the stored release.
 #[derive(Debug, thiserror::Error)]

@@ -1,12 +1,11 @@
 //! Defines artist credits and resolves names and MBIDs into ordered attributions.
 
-use std::sync::LazyLock;
-
 use itertools::Itertools;
 use regex::Regex;
 use serde_json::json;
+use std::sync::LazyLock;
 
-use super::{ArtistId, normalization};
+use crate::domain::{id::ArtistId, normalization};
 
 /// A failure to resolve artist names and optional MBIDs into valid credits.
 #[derive(Debug, thiserror::Error)]

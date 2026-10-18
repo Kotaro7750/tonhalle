@@ -1,18 +1,28 @@
 //! Initializes storage and serves the HTTP API.
 
-use std::{net::SocketAddr, sync::Arc};
-
-use axum::{Router, http::Method};
+use axum::{Router, http::Method, routing::get};
+use std::{io::Error as IoError, net::SocketAddr, sync::Arc};
+use tokio::{
+    net::TcpListener,
+    signal::ctrl_c,
+    task::{JoinError, spawn_blocking},
+};
 use tower_http::{
     cors::CorsLayer,
     trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer},
 };
 
 use crate::{
-    config::ServerConfig,
+    config::server::{CorsOriginError, ServerConfig, ServerConfigError},
     controller::MusicController,
-    infrastructure::metadata_index::InMemoryMetadataIndex,
-    usecase::{BuildMetadataIndexUseCase, GetReleaseUseCase, GetTrackUseCase, ListReleasesUseCase},
+    infrastructure::{
+        metadata_index::InMemoryMetadataIndex,
+        music_storage::filesystem::FileSystemContentStorageConstructionError,
+    },
+    usecase::{
+        GetReleaseUseCase, GetTrackUseCase, ListReleasesUseCase,
+        build_metadata_index::{BuildMetadataIndexError, BuildMetadataIndexUseCase},
+    },
 };
 
 /// A failure to initialize or run the API server.
@@ -20,24 +30,22 @@ use crate::{
 pub(crate) enum ServerError {
     /// Command-specific configuration requirements are not satisfied.
     #[error(transparent)]
-    Config(#[from] crate::config::ServerConfigError),
+    Config(#[from] ServerConfigError),
     /// The configured browser origin is invalid.
     #[error(transparent)]
-    Cors(#[from] crate::config::CorsOriginError),
+    Cors(#[from] CorsOriginError),
     /// Music storage cannot be initialized.
     #[error(transparent)]
-    Storage(
-        #[from] crate::infrastructure::music_storage::filesystem::FileSystemContentStorageConstructionError,
-    ),
+    Storage(#[from] FileSystemContentStorageConstructionError),
     /// Startup indexing failed.
     #[error(transparent)]
-    Index(#[from] crate::usecase::BuildMetadataIndexError),
+    Index(#[from] BuildMetadataIndexError),
     /// The indexing worker failed.
     #[error(transparent)]
-    Worker(#[from] tokio::task::JoinError),
+    Worker(#[from] JoinError),
     /// Network or server I/O failed.
     #[error(transparent)]
-    Io(#[from] std::io::Error),
+    Io(#[from] IoError),
 }
 
 /// Builds the startup index and serves the configured API until shutdown.
@@ -49,8 +57,7 @@ pub(crate) async fn run(config: &ServerConfig) -> Result<(), ServerError> {
 
     tracing::info!("Scanning music storage");
     let releases =
-        tokio::task::spawn_blocking(move || BuildMetadataIndexUseCase::new(storage).execute())
-            .await??;
+        spawn_blocking(move || BuildMetadataIndexUseCase::new(storage).execute()).await??;
     tracing::info!(
         release_count = releases.len(),
         track_count = releases
@@ -69,7 +76,7 @@ pub(crate) async fn run(config: &ServerConfig) -> Result<(), ServerError> {
 
     let mut app = Router::new()
         .nest("/api/v0", controller.router())
-        .route("/health", axum::routing::get(|| async { "OK" }))
+        .route("/health", get(|| async { "OK" }))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(tracing::Level::INFO))
@@ -84,7 +91,7 @@ pub(crate) async fn run(config: &ServerConfig) -> Result<(), ServerError> {
         );
     }
 
-    let listener = tokio::net::TcpListener::bind(config.listen_address()).await?;
+    let listener = TcpListener::bind(config.listen_address()).await?;
     tracing::info!(address = %listener.local_addr()?, "Tonhalle server listening");
 
     axum::serve(
@@ -100,21 +107,25 @@ pub(crate) async fn run(config: &ServerConfig) -> Result<(), ServerError> {
 /// Waits for Ctrl+C or SIGTERM to initiate graceful shutdown.
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
+        ctrl_c().await.expect("failed to install Ctrl+C handler");
     };
 
     #[cfg(unix)]
     let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        use tokio::signal::unix::{SignalKind, signal};
+
+        signal(SignalKind::terminate())
             .expect("failed to install SIGTERM handler")
             .recv()
             .await;
     };
 
     #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
+    let terminate = {
+        use std::future::pending;
+
+        pending::<()>()
+    };
 
     tokio::select! { _ = ctrl_c => {}, _ = terminate => {} }
     tracing::info!("Signal received; shutting down");

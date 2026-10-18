@@ -2,7 +2,7 @@
 
 use clap::Args;
 
-use super::{
+use crate::config::{
     content_storage::ContentStorageConfig,
     import_storages::{ImportConfigError, ImportSourceConfig},
 };

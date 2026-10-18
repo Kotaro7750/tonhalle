@@ -1,13 +1,17 @@
 //! Converts validated domain entities to OpenAPI response models.
 
+use domain::artist_credit::ArtistCredit;
 use tonhalle_api::{models, types::Nullable};
 
-use crate::domain::primitive::{audio_file::AudioFile, release::Release, track::Track};
-use crate::{domain, port::metadata_index};
+use crate::{
+    domain,
+    domain::primitive::{audio_file::AudioFile, release::Release, track::Track},
+    port::metadata_index,
+};
 
-impl From<&domain::ArtistCredit> for models::ArtistCredit {
+impl From<&ArtistCredit> for models::ArtistCredit {
     /// Preserves artist display spelling and represents absent separators as JSON null.
-    fn from(value: &domain::ArtistCredit) -> Self {
+    fn from(value: &ArtistCredit) -> Self {
         Self {
             artist_id: value.artist_id().to_string(),
             name: value.name().to_owned(),

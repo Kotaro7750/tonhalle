@@ -1,34 +1,38 @@
 //! Supports API integration tests with sample audio and OpenAPI response validation.
 
-use std::{
-    collections::BTreeMap,
-    path::PathBuf,
-    sync::{Arc, LazyLock},
-};
-
 use async_trait::async_trait;
 use axum::{
     Router,
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
+use jsonschema::draft202012::options;
 use serde_json::{Value, json};
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    sync::{Arc, LazyLock},
+};
 use tower::ServiceExt;
 
 use crate::{
     controller::MusicController,
     domain::{
-        ArtistId, ReleaseId, TrackId,
+        id::{ArtistId, ReleaseId, TrackId},
         primitive::{release::Release, track::Track},
     },
     infrastructure::{
         metadata_index::InMemoryMetadataIndex, music_storage::filesystem::FileSystemMusicStorage,
     },
     port::metadata_index::{self, MetadataIndex, ReleasePage},
-    usecase::{BuildMetadataIndexUseCase, GetReleaseUseCase, GetTrackUseCase, ListReleasesUseCase},
+    usecase::{
+        GetReleaseUseCase, GetTrackUseCase, ListReleasesUseCase,
+        build_metadata_index::BuildMetadataIndexUseCase,
+    },
 };
 
 mod errors;
+mod import;
 mod reads;
 
 /// Opens repository audio fixtures through the production storage adapter.
@@ -118,7 +122,7 @@ static CONTRACT_VALIDATORS: LazyLock<BTreeMap<&'static str, jsonschema::Validato
             let mut schema = contract.clone();
             schema["$ref"] = json!(format!("#/components/schemas/{name}"));
 
-            let validator = jsonschema::draft202012::options()
+            let validator = options()
                 .should_validate_formats(true)
                 .build(&schema)
                 .unwrap();
@@ -127,5 +131,3 @@ static CONTRACT_VALIDATORS: LazyLock<BTreeMap<&'static str, jsonschema::Validato
         })
         .collect()
     });
-
-mod import;

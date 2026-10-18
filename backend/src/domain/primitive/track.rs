@@ -2,9 +2,12 @@
 
 use serde_json::json;
 
-use super::audio_file::AudioFile;
-use crate::domain::artist_credit::{ArtistCreditValidationError, artist_credits};
-use crate::domain::{ArtistCredit, ReleaseId, TrackId, normalization};
+use crate::domain::{
+    artist_credit::{ArtistCredit, ArtistCreditValidationError, artist_credits},
+    id::{ReleaseId, TrackId},
+    normalization,
+    primitive::audio_file::AudioFile,
+};
 
 /// A failure to construct a track from its required metadata.
 #[derive(Debug, thiserror::Error)]
@@ -162,8 +165,10 @@ fn number(value: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::TrackValidationError;
-    use crate::domain::{artist_credit::ArtistCreditValidationError, ingestion::IngestTrackError};
-    use crate::test_support::sample_fixture;
+    use crate::{
+        domain::{artist_credit::ArtistCreditValidationError, ingestion::IngestTrackError},
+        test_support::sample_fixture,
+    };
 
     #[test]
     fn track_metadata_new_requires_positive_positions_and_ignores_totals() {

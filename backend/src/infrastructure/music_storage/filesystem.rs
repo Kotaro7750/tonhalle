@@ -2,18 +2,16 @@
 
 use std::{
     collections::BTreeMap,
-    fs::{File, OpenOptions},
-    io::Write,
-    path::{Path, PathBuf},
+    fs::{File, OpenOptions, create_dir_all, read, rename, symlink_metadata},
+    io::{Error as IoError, ErrorKind, Write},
+    path::{Path, PathBuf, StripPrefixError},
 };
-
 use url::Url;
 use walkdir::WalkDir;
 
 use crate::{
     domain::{
-        AudioFileId, ReleaseId,
-        id::ParseAudioFileIdError,
+        id::{AudioFileId, ParseAudioFileIdError, ReleaseId},
         import::ImportRelease,
         ingestion::{build_release, ingest_track},
         primitive::{audio_file::MediaType, release::Release},
@@ -29,7 +27,7 @@ use crate::{
 pub(crate) enum FileSystemContentStorageConstructionError {
     /// The configured destination cannot be resolved.
     #[error("resolving content storage root: {0}")]
-    ResolveRoot(#[from] std::io::Error),
+    ResolveRoot(#[from] IoError),
     /// The resolved destination does not satisfy storage requirements.
     #[error(transparent)]
     Storage(#[from] FileSystemStorageConstructionError),
@@ -106,7 +104,7 @@ enum ReadAudioFileError {
     InvalidFileName,
     /// The file cannot be addressed relative to the configured storage directory.
     #[error("audio object is outside content root: {0}")]
-    OutsideContentRoot(#[source] std::path::StripPrefixError),
+    OutsideContentRoot(#[source] StripPrefixError),
     /// The relative path cannot be used as a text object key.
     #[error("non-UTF-8 object key")]
     NonUtf8ObjectKey,
@@ -115,7 +113,7 @@ enum ReadAudioFileError {
     InvalidPlaybackUrlBase,
     /// The stored file could not be read.
     #[error("reading audio: {0}")]
-    Read(#[source] std::io::Error),
+    Read(#[source] IoError),
     /// The filename does not preserve a valid UUID v4 audio identity.
     #[error(transparent)]
     InvalidAudioId(#[from] ParseAudioFileIdError),
@@ -189,7 +187,7 @@ impl FileSystemMusicStorage {
         &self,
         path: &Path,
     ) -> Result<(AudioFileId, String, Url, Vec<u8>), ReadAudioFileError> {
-        if !std::fs::symlink_metadata(path)
+        if !symlink_metadata(path)
             .map_err(ReadAudioFileError::Read)?
             .is_file()
         {
@@ -221,7 +219,7 @@ impl FileSystemMusicStorage {
             .pop_if_empty()
             .extend(segments);
 
-        let bytes = std::fs::read(path).map_err(ReadAudioFileError::Read)?;
+        let bytes = read(path).map_err(ReadAudioFileError::Read)?;
 
         Ok((audio_id, object_key, playback_url, bytes))
     }
@@ -287,11 +285,8 @@ impl MusicStorage for FileSystemMusicStorage {
     /// Publishes a validated release without replacing existing audio.
     fn save_release(
         &self,
-        release: &crate::domain::import::ImportRelease,
-    ) -> Result<
-        crate::port::music_storage::SaveReleaseOutcome,
-        crate::port::music_storage::SaveReleaseError,
-    > {
+        release: &ImportRelease,
+    ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
         save_release(&self.root_path, release)
     }
 
@@ -373,7 +368,7 @@ enum FileSystemSaveReleaseError {
     InvalidStagingDirectory,
     /// A filesystem operation failed.
     #[error("filesystem save operation failed: {0}")]
-    Io(#[from] std::io::Error),
+    Io(#[from] IoError),
 }
 
 /// Converts physical save failures to release-specific port errors.
@@ -406,21 +401,18 @@ fn persist_release(
     lock.lock()?;
 
     let destination = root.join(release.id().as_ref());
-    match std::fs::symlink_metadata(&destination) {
+    match symlink_metadata(&destination) {
         Ok(metadata) if metadata.is_dir() => return Ok(SaveReleaseOutcome::AlreadyExists),
         Ok(_) => {
             return Err(FileSystemSaveReleaseError::ConflictingDestination);
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
         Err(error) => return Err(error.into()),
     }
 
     let staging_root = root.join(STAGING_DIRECTORY);
-    std::fs::create_dir_all(&staging_root)?;
-    if std::fs::symlink_metadata(&staging_root)?
-        .file_type()
-        .is_symlink()
-    {
+    create_dir_all(&staging_root)?;
+    if symlink_metadata(&staging_root)?.file_type().is_symlink() {
         return Err(FileSystemSaveReleaseError::InvalidStagingDirectory);
     }
     let staging = tempfile::tempdir_in(staging_root)?;
@@ -439,7 +431,7 @@ fn persist_release(
         file.sync_all()?;
     }
     File::open(staging.path())?.sync_all()?;
-    std::fs::rename(staging.path(), destination)?;
+    rename(staging.path(), destination)?;
     File::open(root)?.sync_all()?;
     Ok(SaveReleaseOutcome::Saved)
 }
@@ -447,19 +439,24 @@ fn persist_release(
 /// Verifies release identity and physical causes survive the save-port boundary.
 #[cfg(test)]
 mod save_tests {
+    use std::{
+        error::Error,
+        fs::{read, write},
+        io::{Error as IoError, ErrorKind},
+    };
+
     use super::*;
     use crate::test_support::{sample_audio, sample_fixture};
-    use std::error::Error;
 
     #[test]
     fn save_release_distinguishes_conflicts_and_preserves_io_failure_causes() {
         let root = tempfile::tempdir().unwrap();
         let release = ImportRelease::new(vec![sample_audio(&sample_fixture().build())]).unwrap();
         let destination = root.path().join(release.id().as_ref());
-        std::fs::write(&destination, b"existing object").unwrap();
+        write(&destination, b"existing object").unwrap();
         assert!(matches!(save_release(root.path(), &release),
             Err(SaveReleaseError::Conflict { id }) if &id == release.id()));
-        assert_eq!(std::fs::read(destination).unwrap(), b"existing object");
+        assert_eq!(read(destination).unwrap(), b"existing object");
 
         let error = save_release(&root.path().join("missing"), &release).unwrap_err();
         assert!(matches!(&error, SaveReleaseError::Internal { id, .. } if id == release.id()));
@@ -468,15 +465,17 @@ mod save_tests {
             .unwrap()
             .source()
             .unwrap()
-            .downcast_ref::<std::io::Error>()
+            .downcast_ref::<IoError>()
             .unwrap();
-        assert_eq!(io.kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(io.kind(), ErrorKind::NotFound);
     }
 }
 
 /// Verifies filesystem scanning through its domain release contract.
 #[cfg(test)]
 mod tests {
+    use std::fs::{create_dir, create_dir_all, read, remove_dir, write};
+
     use super::*;
     use crate::{
         domain::{ingestion::IngestTrackError, primitive::release::ReleaseValidationError},
@@ -498,10 +497,10 @@ mod tests {
         let id = release_metadata(&raw).unwrap().id().clone();
         let directory = root.join(id.as_ref());
 
-        std::fs::create_dir_all(&directory).unwrap();
+        create_dir_all(&directory).unwrap();
 
         let path = directory.join(format!("{}.wav", source.audio_file().id()));
-        std::fs::write(&path, sample_audio(&raw)).unwrap();
+        write(&path, sample_audio(&raw)).unwrap();
 
         path
     }
@@ -512,7 +511,7 @@ mod tests {
         let nested = temp.path().join("artist with spaces #?%");
         let source = sample_metadata();
         let path = write_audio(&nested, &MetadataFixture::from(&source));
-        let original = std::fs::read(&path).unwrap();
+        let original = read(&path).unwrap();
 
         for _ in 0..2 {
             let release = storage(temp.path())
@@ -535,7 +534,7 @@ mod tests {
                     audio.id()
                 )
             );
-            assert_eq!(std::fs::read(&path).unwrap(), original);
+            assert_eq!(read(&path).unwrap(), original);
         }
     }
 
@@ -544,9 +543,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let directory = temp.path().join("invalid-release");
 
-        std::fs::create_dir(&directory).unwrap();
+        create_dir(&directory).unwrap();
 
-        std::fs::write(directory.join("invalid-audio-id.wav"), b"corrupt").unwrap();
+        write(directory.join("invalid-audio-id.wav"), b"corrupt").unwrap();
 
         let result = storage(temp.path()).scan_releases().unwrap().pop().unwrap();
 
@@ -562,8 +561,8 @@ mod tests {
         let path = write_audio(temp.path(), &MetadataFixture::from(&source));
         let directory = path.parent().unwrap();
 
-        std::fs::write(directory.join("invalid-audio-id.wav"), b"corrupt").unwrap();
-        std::fs::write(
+        write(directory.join("invalid-audio-id.wav"), b"corrupt").unwrap();
+        write(
             directory.join("229fc612-8a56-45d0-bf61-55b36ff3dcba.wav"),
             b"corrupt",
         )
@@ -574,7 +573,7 @@ mod tests {
         *different.audio_file_mut().id_mut() =
             "925eda40-54cb-4af4-9579-6811fc7477ac".parse().unwrap();
 
-        std::fs::write(
+        write(
             directory.join(format!("{}.wav", different.audio_file().id())),
             sample_audio(&different.build()),
         )
@@ -648,7 +647,7 @@ mod tests {
         let empty = tempfile::tempdir().unwrap();
         let id = release_metadata(&source).unwrap().id().clone();
 
-        std::fs::create_dir(empty.path().join(id.as_ref())).unwrap();
+        create_dir(empty.path().join(id.as_ref())).unwrap();
 
         let failure = storage(empty.path())
             .scan_releases()
@@ -679,7 +678,7 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results.pop().unwrap().unwrap().tracks().len(), 2);
 
-        std::fs::write(
+        write(
             second_path
                 .parent()
                 .unwrap()
@@ -702,11 +701,11 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("music");
 
-        std::fs::create_dir(&root).unwrap();
+        create_dir(&root).unwrap();
 
         let storage = storage(&root);
 
-        std::fs::remove_dir(&root).unwrap();
+        remove_dir(&root).unwrap();
 
         assert!(storage.scan_releases().is_err());
     }
@@ -714,11 +713,13 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn scan_releases_rejects_symbolic_links_without_following_them() {
+        use std::os::unix::fs::symlink;
+
         let temp = tempfile::tempdir().unwrap();
         let source = sample_metadata();
         let path = write_audio(temp.path(), &MetadataFixture::from(&source));
 
-        std::os::unix::fs::symlink(
+        symlink(
             &path,
             path.parent()
                 .unwrap()

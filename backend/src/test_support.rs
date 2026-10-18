@@ -1,8 +1,8 @@
 //! Builds synthetic source metadata for domain and workflow unit tests.
 
 use crate::domain::{
-    AudioFileId, ReleaseId,
-    ingestion::{IngestTrackError, build_release, metadata::RawMetadata},
+    id::{AudioFileId, ReleaseId},
+    ingestion::{IngestTrackError, build_release, ingest_track, metadata::RawMetadata},
     primitive::{
         audio_file::{AudioFile, AudioFileValidationError, AudioProperties, MediaType},
         release::{Release, ReleaseMetadata, ReleaseMetadataValidationError},
@@ -229,7 +229,7 @@ impl MetadataFixture {
         &self,
         release_id: &ReleaseId,
     ) -> Result<(Track, ReleaseMetadata), IngestTrackError> {
-        crate::domain::ingestion::ingest_track(
+        ingest_track(
             &sample_audio(&self.build()),
             self.audio_file.id,
             self.audio_file.object_key.clone(),

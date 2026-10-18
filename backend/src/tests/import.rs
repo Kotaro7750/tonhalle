@@ -1,25 +1,28 @@
 //! Verifies release-level import persistence, restart safety, and index compatibility.
 
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
+use std::{fs, path::Path, sync::Arc, thread::spawn};
+
 use crate::{
-    domain::{AudioFileId, import::ImportRelease},
+    domain::{id::AudioFileId, import::ImportRelease, primitive::release::Release},
     infrastructure::{
         import_source::filesystem::FileSystemImportSource,
         music_storage::filesystem::FileSystemMusicStorage,
     },
     port::music_storage::{MusicStorage, SaveReleaseOutcome},
     test_support::{sample_audio, sample_fixture},
-    usecase::{BuildMetadataIndexUseCase, import_music::ImportMusicUseCase},
+    usecase::{build_metadata_index::BuildMetadataIndexUseCase, import_music::ImportMusicUseCase},
 };
-use std::{fs, sync::Arc};
 
 /// Writes arbitrary filenames beneath an import release directory.
-fn write_source(root: &std::path::Path, group: &str, name: &str, bytes: &[u8]) {
+fn write_source(root: &Path, group: &str, name: &str, bytes: &[u8]) {
     fs::create_dir_all(root.join(group)).unwrap();
     fs::write(root.join(group).join(name), bytes).unwrap();
 }
 
 /// Opens saved releases through the same adapter used at server startup.
-fn read_releases(root: &std::path::Path) -> Vec<crate::domain::primitive::release::Release> {
+fn read_releases(root: &Path) -> Vec<Release> {
     let storage = FileSystemMusicStorage::new(
         root.to_owned(),
         "https://example.com/audio/".parse().unwrap(),
@@ -66,7 +69,7 @@ fn import_music_preserves_bytes_issues_persistent_uuids_and_skips_existing_relea
             assert!(
                 originals.contains(&fs::read(destination.path().join(audio.object_key())).unwrap())
             );
-            let path = std::path::Path::new(audio.object_key());
+            let path = Path::new(audio.object_key());
             let id: AudioFileId = path.file_stem().unwrap().to_str().unwrap().parse().unwrap();
             assert_eq!(id, audio.id());
             assert!(identities.iter().all(|previous| previous != &id));
@@ -109,7 +112,7 @@ fn import_music_continues_after_read_validation_and_save_failures_and_can_retry(
     write_source(source.path(), "c-duplicate", "two.wav", &bytes);
     write_source(source.path(), "d-success", "audio.wav", &bytes);
     #[cfg(unix)]
-    std::os::unix::fs::symlink(
+    symlink(
         source.path().join("missing"),
         source.path().join("d-success/broken.wav"),
     )
@@ -160,7 +163,7 @@ fn music_storage_serializes_concurrent_saves_and_hides_incomplete_staging() {
         .map(|_| {
             let storage = storage.clone();
             let bytes = bytes.clone();
-            std::thread::spawn(move || {
+            spawn(move || {
                 storage
                     .save_release(&ImportRelease::new(vec![bytes]).unwrap())
                     .unwrap()

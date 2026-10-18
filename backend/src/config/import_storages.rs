@@ -1,18 +1,16 @@
 //! Constructs import ports from independently scoped storage settings.
 
+use clap::Args;
 use std::sync::Arc;
 
-use clap::Args;
-
 use crate::{
+    config::content_storage::ContentStorageConfig,
     infrastructure::import_source::filesystem::{
         FileSystemImportCompatibilityError, FileSystemImportSourceConfig,
         FileSystemImportSourceConstructionError,
     },
     port::import_source::ImportSource,
 };
-
-use super::content_storage::ContentStorageConfig;
 
 /// A failure to construct or validate the configured import adapters.
 #[derive(Debug, thiserror::Error)]

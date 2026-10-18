@@ -1,5 +1,7 @@
 //! Verifies HTTP request rejection and safe problem responses.
 
+use std::io::Error as IoError;
+
 use super::*;
 
 #[tokio::test]
@@ -76,21 +78,21 @@ impl MetadataIndex for FailingIndex {
         _: Option<String>,
     ) -> Result<ReleasePage, metadata_index::ListReleasesError> {
         Err(metadata_index::ListReleasesError::Internal(Box::new(
-            std::io::Error::other("secret filesystem path"),
+            IoError::other("secret filesystem path"),
         )))
     }
 
     /// Simulates an internal release lookup failure with private infrastructure details.
     async fn get_release(&self, _: &ReleaseId) -> Result<Release, metadata_index::GetReleaseError> {
         Err(metadata_index::GetReleaseError::Internal(Box::new(
-            std::io::Error::other("secret filesystem path"),
+            IoError::other("secret filesystem path"),
         )))
     }
 
     /// Simulates an internal track lookup failure with private infrastructure details.
     async fn get_track(&self, _: &TrackId) -> Result<Track, metadata_index::GetTrackError> {
         Err(metadata_index::GetTrackError::Internal(Box::new(
-            std::io::Error::other("secret filesystem path"),
+            IoError::other("secret filesystem path"),
         )))
     }
 }

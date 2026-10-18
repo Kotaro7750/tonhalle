@@ -2,7 +2,7 @@
 
 use url::Url;
 
-use crate::domain::AudioFileId;
+use crate::domain::id::AudioFileId;
 
 /// A supported audio content type independent of its storage location.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

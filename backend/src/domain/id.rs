@@ -3,10 +3,9 @@
 //! Entity identifiers follow the hashing rules in `docs/domain.md`.
 //! Audio-file identifiers retain the UUID issued when the file was stored.
 
-use std::{fmt, str::FromStr};
-
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::{fmt, str::FromStr};
 use uuid::{Uuid, fmt::Hyphenated};
 
 /// An entity kind used in identifier prefixes and hash inputs.

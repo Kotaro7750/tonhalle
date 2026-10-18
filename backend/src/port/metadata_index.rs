@@ -1,9 +1,10 @@
 //! Defines indexed music queries and their results.
 
 use async_trait::async_trait;
+use std::error;
 
 use crate::domain::{
-    ReleaseId, TrackId,
+    id::{ReleaseId, TrackId},
     primitive::{release::Release, track::Track},
 };
 
@@ -36,7 +37,7 @@ pub(crate) enum ListReleasesError {
     InvalidCursor,
     /// The index operation failed with a retained source error.
     #[error("listing releases: {0}")]
-    Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[from] Box<dyn error::Error + Send + Sync>),
 }
 
 /// A failure to retrieve an indexed release.
@@ -47,7 +48,7 @@ pub(crate) enum GetReleaseError {
     NotFound,
     /// The index operation failed with a retained source error.
     #[error("getting release: {0}")]
-    Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[from] Box<dyn error::Error + Send + Sync>),
 }
 
 /// A failure to retrieve an indexed track.
@@ -58,7 +59,7 @@ pub(crate) enum GetTrackError {
     NotFound,
     /// The index operation failed with a retained source error.
     #[error("getting track: {0}")]
-    Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[from] Box<dyn error::Error + Send + Sync>),
 }
 
 /// Provides asynchronous browsing of accepted music entities.

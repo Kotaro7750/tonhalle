@@ -8,17 +8,16 @@ use axum::{
     },
     routing::get,
 };
+use error::ControllerError;
 use tonhalle_api::models;
 
 use crate::{
-    domain::{ReleaseId, TrackId},
+    domain::id::{ReleaseId, TrackId},
     usecase::{GetReleaseUseCase, GetTrackUseCase, ListReleasesUseCase},
 };
 
 mod domain_type_convert;
 mod error;
-
-use error::ControllerError;
 
 /// Handles music browsing requests using application query workflows.
 #[derive(Clone)]

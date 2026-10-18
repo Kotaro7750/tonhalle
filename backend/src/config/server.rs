@@ -1,12 +1,14 @@
 //! Defines HTTP server settings and browser-origin validation.
 
-use std::net::{IpAddr, SocketAddr};
-
-use axum::http::HeaderValue;
+use axum::http::{HeaderValue, header::InvalidHeaderValue};
 use clap::Args;
+use std::net::{IpAddr, SocketAddr};
 use url::Url;
 
-use super::content_storage::ContentStorageConfig;
+use crate::{
+    config::content_storage::ContentStorageConfig,
+    infrastructure::music_storage::filesystem::FileSystemStorageConstructionError,
+};
 
 /// A failure to validate the configured browser origin.
 #[derive(Debug, thiserror::Error)]
@@ -19,7 +21,7 @@ pub(crate) enum CorsOriginError {
     InvalidOrigin,
     /// The origin cannot be represented in an HTTP header.
     #[error("invalid CORS origin header: {0}")]
-    HeaderValue(#[from] axum::http::header::InvalidHeaderValue),
+    HeaderValue(#[from] InvalidHeaderValue),
 }
 
 /// Server settings parsed from CLI arguments or the TONHALLE environment namespace.
@@ -56,10 +58,7 @@ pub(crate) enum ServerConfigError {
     Cors(#[from] CorsOriginError),
     /// The storage delivery configuration is missing or invalid.
     #[error(transparent)]
-    Storage(
-        #[from]
-        crate::infrastructure::music_storage::filesystem::FileSystemStorageConstructionError,
-    ),
+    Storage(#[from] FileSystemStorageConstructionError),
 }
 
 impl ServerConfig {
@@ -98,8 +97,10 @@ impl ServerConfig {
 /// Verifies the application-specific browser-origin constraints.
 #[cfg(test)]
 mod tests {
-    use super::*;
     use clap::Parser;
+
+    use super::*;
+    use crate::infrastructure::music_storage::filesystem::FileSystemStorageConstructionError;
 
     /// Constructs server settings with a valid playback endpoint.
     fn config(origin: Option<&str>) -> ServerConfig {
@@ -135,9 +136,12 @@ mod tests {
         assert!(settings.validate().is_ok());
 
         let settings = config_with_playback_url(None, None);
-        assert!(matches!(settings.validate(), Err(ServerConfigError::Storage(
-            crate::infrastructure::music_storage::filesystem::FileSystemStorageConstructionError::MissingPlaybackUrlBase
-        ))));
+        assert!(matches!(
+            settings.validate(),
+            Err(ServerConfigError::Storage(
+                FileSystemStorageConstructionError::MissingPlaybackUrlBase
+            ))
+        ));
 
         for url in [
             "ftp://example.com/",
@@ -145,9 +149,12 @@ mod tests {
             "https://example.com/#fragment",
         ] {
             let settings = config_with_playback_url(None, Some(url));
-            assert!(matches!(settings.validate(), Err(ServerConfigError::Storage(
-                crate::infrastructure::music_storage::filesystem::FileSystemStorageConstructionError::InvalidPlaybackUrlBase
-            ))));
+            assert!(matches!(
+                settings.validate(),
+                Err(ServerConfigError::Storage(
+                    FileSystemStorageConstructionError::InvalidPlaybackUrlBase
+                ))
+            ));
         }
     }
 

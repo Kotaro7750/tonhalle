@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::domain::{
-    ReleaseId, TrackId,
+    id::{ReleaseId, TrackId},
     ingestion::{IngestTrackError, parse_audio},
     primitive::{audio_file::AudioProperties, release::ReleaseMetadata, track::TrackMetadata},
 };

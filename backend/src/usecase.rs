@@ -1,18 +1,17 @@
 //! Queries release and track metadata through the index port.
 
-use std::sync::Arc;
+use std::{error, sync::Arc};
 
 use crate::{
     domain::{
-        ReleaseId, TrackId,
+        id::{ReleaseId, TrackId},
         primitive::{release::Release, track::Track},
     },
     port::metadata_index::{self, MetadataIndex, ReleasePage},
 };
 
-mod build_metadata_index;
-
-pub(crate) use build_metadata_index::{BuildMetadataIndexError, BuildMetadataIndexUseCase};
+pub(crate) mod build_metadata_index;
+pub(crate) mod import_music;
 
 /// Browses accepted releases through the metadata index.
 #[derive(Clone)]
@@ -28,7 +27,7 @@ pub(crate) enum ListReleasesError {
     InvalidCursor,
     /// The underlying index failure remains available for diagnostics.
     #[error("listing releases: {0}")]
-    Internal(#[source] Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[source] Box<dyn error::Error + Send + Sync>),
 }
 
 impl From<metadata_index::ListReleasesError> for ListReleasesError {
@@ -74,7 +73,7 @@ pub(crate) enum GetReleaseError {
     NotFound,
     /// The underlying index failure remains available for diagnostics.
     #[error("getting release: {0}")]
-    Internal(#[source] Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[source] Box<dyn error::Error + Send + Sync>),
 }
 
 impl From<metadata_index::GetReleaseError> for GetReleaseError {
@@ -113,7 +112,7 @@ pub(crate) enum GetTrackError {
     NotFound,
     /// The underlying index failure remains available for diagnostics.
     #[error("getting track: {0}")]
-    Internal(#[source] Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[source] Box<dyn error::Error + Send + Sync>),
 }
 
 impl From<metadata_index::GetTrackError> for GetTrackError {
@@ -137,5 +136,3 @@ impl GetTrackUseCase {
         self.index.get_track(id).await.map_err(Into::into)
     }
 }
-
-pub(crate) mod import_music;

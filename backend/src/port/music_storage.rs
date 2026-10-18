@@ -1,8 +1,9 @@
 //! Defines release-level music storage operations and their outcomes.
 
+use std::error;
+
 use crate::domain::{
-    ReleaseId,
-    id::ParseReleaseIdError,
+    id::{ParseReleaseIdError, ReleaseId},
     import::ImportRelease,
     ingestion::IngestTrackError,
     primitive::release::{Release, ReleaseValidationError},
@@ -28,18 +29,18 @@ pub(crate) enum SaveReleaseError {
     Internal {
         id: ReleaseId,
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: Box<dyn error::Error + Send + Sync>,
     },
 }
 
 /// A storage enumeration failure that prevents a complete scan.
 #[derive(Debug, thiserror::Error)]
 #[error("scanning music storage: {0}")]
-pub(crate) struct ScanReleasesError(#[from] Box<dyn std::error::Error + Send + Sync>);
+pub(crate) struct ScanReleasesError(#[from] Box<dyn error::Error + Send + Sync>);
 
 impl ScanReleasesError {
     /// Preserves the underlying failure in the error source chain.
-    pub(crate) fn new(source: impl std::error::Error + Send + Sync + 'static) -> Self {
+    pub(crate) fn new(source: impl error::Error + Send + Sync + 'static) -> Self {
         Self(Box::new(source))
     }
 }
@@ -52,7 +53,7 @@ pub(crate) enum AudioScanFailure {
     Read {
         object_key: String,
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: Box<dyn error::Error + Send + Sync>,
     },
     /// Domain parsing or validation rejected the source audio.
     #[error("parsing {object_key}: {source}")]

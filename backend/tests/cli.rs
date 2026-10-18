@@ -1,11 +1,17 @@
 //! Verifies the executable's command and environment configuration contract.
 
-use std::process::{Command, Output};
+use std::{
+    collections::BTreeMap,
+    env::vars_os,
+    fs::{copy, create_dir, read, read_dir, remove_dir_all, write},
+    path::{Path, PathBuf},
+    process::{Command, Output},
+};
 
 /// Runs the executable with isolated application configuration.
 fn run(args: &[&str], env: &[(&str, &str)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_tonhalle-backend"));
-    for (name, _) in std::env::vars_os() {
+    for (name, _) in vars_os() {
         if name.to_string_lossy().starts_with("TONHALLE_") {
             command.env_remove(name);
         }
@@ -50,7 +56,7 @@ fn server_cli_overrides_environment_before_validation() {
 }
 
 /// Returns a stable snapshot of published filenames and unchanged audio bytes.
-fn saved_audio(root: &std::path::Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+fn saved_audio(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
     walkdir::WalkDir::new(root)
         .into_iter()
         .map(Result::unwrap)
@@ -64,7 +70,7 @@ fn saved_audio(root: &std::path::Path) -> std::collections::BTreeMap<std::path::
         .map(|entry| {
             (
                 entry.path().strip_prefix(root).unwrap().to_owned(),
-                std::fs::read(entry.path()).unwrap(),
+                read(entry.path()).unwrap(),
             )
         })
         .collect()
@@ -72,7 +78,7 @@ fn saved_audio(root: &std::path::Path) -> std::collections::BTreeMap<std::path::
 
 #[test]
 fn import_cli_imports_multiple_releases_and_retries_without_changing_saved_audio() {
-    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sample");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../sample");
     let destination = tempfile::tempdir().unwrap();
     let args = [
         "import",
@@ -104,12 +110,12 @@ fn import_cli_imports_multiple_releases_and_retries_without_changing_saved_audio
 fn import_cli_continues_after_invalid_release_and_reports_nonzero_status() {
     let source = tempfile::tempdir().unwrap();
     let destination = tempfile::tempdir().unwrap();
-    std::fs::create_dir(source.path().join("a-invalid")).unwrap();
-    std::fs::write(source.path().join("a-invalid/audio.wav"), b"invalid").unwrap();
-    std::fs::create_dir(source.path().join("b-valid")).unwrap();
-    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    create_dir(source.path().join("a-invalid")).unwrap();
+    write(source.path().join("a-invalid/audio.wav"), b"invalid").unwrap();
+    create_dir(source.path().join("b-valid")).unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../sample/release-1ac1508956628bfc1927b6fde571efbd604820dbacdeb82ca5d5d58eafe76be7/f8c2a61f-a7ec-4fdb-b154-44f38aa0d7c7.mp3");
-    std::fs::copy(fixture, source.path().join("b-valid/track.mp3")).unwrap();
+    copy(fixture, source.path().join("b-valid/track.mp3")).unwrap();
     let env = [
         (
             "TONHALLE_IMPORT_SOURCE__ROOT_PATH",
@@ -124,7 +130,7 @@ fn import_cli_continues_after_invalid_release_and_reports_nonzero_status() {
     assert!(!result.status.success());
     assert!(String::from_utf8_lossy(&result.stdout).contains("saved: 1, skipped: 0, failed: 1"));
     assert_eq!(saved_audio(destination.path()).len(), 1);
-    std::fs::remove_dir_all(source.path().join("a-invalid")).unwrap();
+    remove_dir_all(source.path().join("a-invalid")).unwrap();
     let result = run(&["import"], &env);
     assert!(result.status.success());
     assert!(String::from_utf8_lossy(&result.stdout).contains("saved: 0, skipped: 1, failed: 0"));
@@ -134,7 +140,7 @@ fn import_cli_continues_after_invalid_release_and_reports_nonzero_status() {
 fn import_cli_rejects_overlapping_roots_before_modifying_source() {
     let source = tempfile::tempdir().unwrap();
     let nested = source.path().join("destination");
-    std::fs::create_dir(&nested).unwrap();
+    create_dir(&nested).unwrap();
     let result = run(
         &[
             "import",
@@ -147,7 +153,7 @@ fn import_cli_rejects_overlapping_roots_before_modifying_source() {
     );
     assert!(!result.status.success());
     assert!(String::from_utf8_lossy(&result.stderr).contains("must not overlap"));
-    assert_eq!(std::fs::read_dir(nested).unwrap().count(), 0);
+    assert_eq!(read_dir(nested).unwrap().count(), 0);
 }
 
 #[test]

@@ -1,13 +1,15 @@
 //! Defines read-only source access without exposing physical storage types.
 
+use std::error;
+
 /// A failure to enumerate the complete set of import candidates.
 #[derive(Debug, thiserror::Error)]
 #[error("listing import releases: {0}")]
-pub(crate) struct ListImportReleasesError(#[source] Box<dyn std::error::Error + Send + Sync>);
+pub(crate) struct ListImportReleasesError(#[source] Box<dyn error::Error + Send + Sync>);
 
 impl ListImportReleasesError {
     /// Preserves the concrete adapter failure without exposing its physical representation.
-    pub(crate) fn new(source: impl std::error::Error + Send + Sync + 'static) -> Self {
+    pub(crate) fn new(source: impl error::Error + Send + Sync + 'static) -> Self {
         Self(Box::new(source))
     }
 }
@@ -23,7 +25,7 @@ pub(crate) enum ReadImportAudioError {
     NotFound {
         key: String,
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: Box<dyn error::Error + Send + Sync>,
     },
     /// The referenced object is not eligible for reading as source audio.
     #[error("invalid import audio object: {key}")]
@@ -33,7 +35,7 @@ pub(crate) enum ReadImportAudioError {
     Internal {
         key: String,
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: Box<dyn error::Error + Send + Sync>,
     },
 }
 

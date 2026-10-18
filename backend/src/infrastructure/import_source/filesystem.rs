@@ -2,13 +2,16 @@
 
 use std::{
     collections::BTreeMap,
-    path::{Path, PathBuf},
+    fs::{read, symlink_metadata},
+    io::{Error as IoError, ErrorKind},
+    path::{Component, Path, PathBuf, StripPrefixError},
 };
 
-use crate::domain::primitive::audio_file::MediaType;
-
-use crate::port::import_source::{
-    ImportCandidate, ImportSource, ListImportReleasesError, ReadImportAudioError,
+use crate::{
+    domain::primitive::audio_file::MediaType,
+    port::import_source::{
+        ImportCandidate, ImportSource, ListImportReleasesError, ReadImportAudioError,
+    },
 };
 
 /// A failure to construct a filesystem import source.
@@ -16,7 +19,7 @@ use crate::port::import_source::{
 pub(crate) enum FileSystemImportSourceConstructionError {
     /// The configured root cannot be resolved.
     #[error("resolving import source root: {0}")]
-    ResolveRoot(#[from] std::io::Error),
+    ResolveRoot(#[from] IoError),
     /// The configured root does not identify a directory.
     #[error("import source must be a directory")]
     NotDirectory,
@@ -27,7 +30,7 @@ pub(crate) enum FileSystemImportSourceConstructionError {
 pub(crate) enum FileSystemImportCompatibilityError {
     /// One configured root cannot be resolved.
     #[error("resolving import storage roots: {0}")]
-    ResolveRoot(#[from] std::io::Error),
+    ResolveRoot(#[from] IoError),
     /// Source and destination must not share a directory tree.
     #[error("import source and content storage directories must not overlap")]
     OverlappingRoots,
@@ -41,7 +44,7 @@ enum FileSystemImportEnumerationError {
     Traverse(#[from] walkdir::Error),
     /// An enumerated object cannot be addressed within the source.
     #[error("resolving import object location: {0}")]
-    OutsideRoot(#[from] std::path::StripPrefixError),
+    OutsideRoot(#[from] StripPrefixError),
     /// An enumerated locator cannot be represented as text.
     #[error("non-UTF-8 import path")]
     NonUtf8Path,
@@ -150,14 +153,14 @@ impl ImportSource for FileSystemImportSource {
         if path.is_absolute()
             || path
                 .components()
-                .any(|component| !matches!(component, std::path::Component::Normal(_)))
+                .any(|component| !matches!(component, Component::Normal(_)))
         {
             return Err(ReadImportAudioError::InvalidKey {
                 key: key.to_owned(),
             });
         }
         let path = self.root.join(path);
-        if !std::fs::symlink_metadata(&path)
+        if !symlink_metadata(&path)
             .map_err(|source| read_audio_error(key, source))?
             .is_file()
             || !path
@@ -169,13 +172,13 @@ impl ImportSource for FileSystemImportSource {
                 key: key.to_owned(),
             });
         }
-        std::fs::read(path).map_err(|source| read_audio_error(key, source))
+        read(path).map_err(|source| read_audio_error(key, source))
     }
 }
 
 /// Maps filesystem read failures to source-port semantics without losing their cause.
-fn read_audio_error(key: &str, source: std::io::Error) -> ReadImportAudioError {
-    if source.kind() == std::io::ErrorKind::NotFound {
+fn read_audio_error(key: &str, source: IoError) -> ReadImportAudioError {
+    if source.kind() == ErrorKind::NotFound {
         ReadImportAudioError::NotFound {
             key: key.to_owned(),
             source: Box::new(source),
@@ -191,8 +194,13 @@ fn read_audio_error(key: &str, source: std::io::Error) -> ReadImportAudioError {
 /// Verifies semantic read errors and retained causes at the source-port boundary.
 #[cfg(test)]
 mod tests {
+    use std::{
+        error::Error,
+        fs::create_dir,
+        io::{Error as IoError, ErrorKind},
+    };
+
     use super::*;
-    use std::error::Error;
 
     #[test]
     fn read_audio_distinguishes_invalid_keys_missing_objects_and_invalid_objects() {
@@ -208,12 +216,12 @@ mod tests {
             missing
                 .source()
                 .unwrap()
-                .downcast_ref::<std::io::Error>()
+                .downcast_ref::<IoError>()
                 .unwrap()
                 .kind(),
-            std::io::ErrorKind::NotFound
+            ErrorKind::NotFound
         );
-        std::fs::create_dir(root.path().join("directory.wav")).unwrap();
+        create_dir(root.path().join("directory.wav")).unwrap();
         assert!(matches!(source.read_audio("directory.wav"),
             Err(ReadImportAudioError::InvalidObject { key }) if key == "directory.wav"));
     }

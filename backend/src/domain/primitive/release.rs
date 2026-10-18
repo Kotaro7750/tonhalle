@@ -1,13 +1,15 @@
 //! Defines releases and validates their metadata, membership, original audio selection, and cross-release identities.
 
-use std::collections::{HashMap, HashSet};
-
 use chrono::NaiveDate;
 use serde_json::json;
+use std::collections::{HashMap, HashSet};
 
-use super::track::Track;
-use crate::domain::artist_credit::{ArtistCreditValidationError, artist_credits};
-use crate::domain::{ArtistCredit, AudioFileId, ReleaseId, TrackId, normalization};
+use crate::domain::{
+    artist_credit::{ArtistCredit, ArtistCreditValidationError, artist_credits},
+    id::{AudioFileId, ReleaseId, TrackId},
+    normalization,
+    primitive::track::Track,
+};
 
 /// A failure to derive release identity and display metadata.
 #[derive(Debug, thiserror::Error)]
