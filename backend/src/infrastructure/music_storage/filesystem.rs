@@ -16,7 +16,7 @@ use crate::{
         id::ParseAudioFileIdError,
         import::ImportRelease,
         ingestion::{build_release, ingest_track},
-        primitive::release::Release,
+        primitive::{audio_file::MediaType, release::Release},
     },
     port::music_storage::{
         AudioScanFailure, MusicStorage, ReleaseScanFailure, SaveReleaseError, SaveReleaseOutcome,
@@ -320,13 +320,12 @@ impl MusicStorage for FileSystemMusicStorage {
                 groups.entry(path.to_path_buf()).or_default();
             }
 
-            if !path.extension().is_some_and(|extension| {
-                [
-                    "wav", "flac", "aac", "m4a", "mp4", "ogg", "oga", "opus", "spx", "mp3",
-                ]
-                .iter()
-                .any(|supported| extension.eq_ignore_ascii_case(supported))
-            }) {
+            if !path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .and_then(MediaType::from_extension)
+                .is_some()
+            {
                 continue;
             }
 
@@ -372,9 +371,6 @@ enum FileSystemSaveReleaseError {
     /// A staging symlink cannot be used for writing.
     #[error("staging directory must not be a symlink")]
     InvalidStagingDirectory,
-    /// The adapter cannot select a storage extension for the validated media type.
-    #[error("unsupported audio content type: {0}")]
-    UnsupportedMediaType(&'static str),
     /// A filesystem operation failed.
     #[error("filesystem save operation failed: {0}")]
     Io(#[from] std::io::Error),
@@ -429,15 +425,7 @@ fn persist_release(
     }
     let staging = tempfile::tempdir_in(staging_root)?;
     for audio in release.audio() {
-        let extension = match audio.properties().media_type() {
-            "audio/wav" => "wav",
-            "audio/flac" => "flac",
-            "audio/aac" => "aac",
-            "audio/mp4" => "m4a",
-            "audio/mpeg" => "mp3",
-            "audio/ogg" => "ogg",
-            media_type => return Err(FileSystemSaveReleaseError::UnsupportedMediaType(media_type)),
-        };
+        let extension = audio.properties().media_type().extension();
         let mut file =
             OpenOptions::new()
                 .write(true)

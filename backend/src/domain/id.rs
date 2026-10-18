@@ -9,10 +9,32 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use uuid::{Uuid, fmt::Hyphenated};
 
+/// An entity kind used in identifier prefixes and hash inputs.
+#[derive(Debug, Clone, Copy)]
+enum EntityKind {
+    /// A release identity.
+    Release,
+    /// A track identity.
+    Track,
+    /// An artist identity.
+    Artist,
+}
+
+impl EntityKind {
+    /// Provides the canonical identifier kind.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Release => "release",
+            Self::Track => "track",
+            Self::Artist => "artist",
+        }
+    }
+}
+
 /// Defines a distinct entity ID type and its string-conversion error.
 macro_rules! entity_id {
-    ($name:ident, $error:ident, $kind:literal) => {
-        #[doc = concat!("A validated `", $kind, "-` identifier with a 64-digit lowercase hex hash.")]
+    ($name:ident, $error:ident, $kind:ident) => {
+        #[doc = concat!("A validated ", stringify!($kind), " identifier with a 64-digit lowercase hex hash.")]
         ///
         /// Parsing guarantees the identifier's format and entity kind.
         /// The relationship to source metadata is established during ID generation.
@@ -20,9 +42,9 @@ macro_rules! entity_id {
         #[serde(transparent)]
         pub(crate) struct $name(String);
 
-        #[doc = concat!("An error indicating an invalid `", $kind, "` identifier string.")]
+        #[doc = concat!("An error indicating an invalid ", stringify!($kind), " identifier string.")]
         #[derive(Debug, thiserror::Error)]
-        #[error("invalid {} ID", $kind)]
+        #[error("invalid {} ID", EntityKind::$kind.as_str())]
         pub(crate) struct $error;
 
         impl TryFrom<String> for $name {
@@ -31,7 +53,7 @@ macro_rules! entity_id {
 
             /// Validates an owned string's prefix, hash length, and lowercase hex digits.
             fn try_from(value: String) -> Result<Self, Self::Error> {
-                let valid = value.strip_prefix(concat!($kind, "-")).is_some_and(|hash| {
+                let valid = value.strip_prefix(EntityKind::$kind.as_str()).and_then(|suffix| suffix.strip_prefix('-')).is_some_and(|hash| {
                     hash.len() == 64
                         && hash
                             .bytes()
@@ -68,28 +90,28 @@ macro_rules! entity_id {
     };
 }
 
-entity_id!(ReleaseId, ParseReleaseIdError, "release");
-entity_id!(TrackId, ParseTrackIdError, "track");
-entity_id!(ArtistId, ParseArtistIdError, "artist");
+entity_id!(ReleaseId, ParseReleaseIdError, Release);
+entity_id!(TrackId, ParseTrackIdError, Track);
+entity_id!(ArtistId, ParseArtistIdError, Artist);
 
 impl ArtistId {
     /// Creates an artist ID from its MBID or normalized name metadata.
     pub(crate) fn from_metadata(mbid: Option<Uuid>, metadata: Value) -> Self {
-        Self(hash_id("artist", mbid, metadata))
+        Self(hash_id(EntityKind::Artist, mbid, metadata))
     }
 }
 
 impl ReleaseId {
     /// Creates a release ID exclusively from normalized release metadata.
     pub(crate) fn from_metadata(metadata: Value) -> Self {
-        Self(hash_id("release", None, metadata))
+        Self(hash_id(EntityKind::Release, None, metadata))
     }
 }
 
 impl TrackId {
     /// Creates a track ID exclusively from normalized release and track metadata.
     pub(crate) fn from_metadata(metadata: Value) -> Self {
-        Self(hash_id("track", None, metadata))
+        Self(hash_id(EntityKind::Track, None, metadata))
     }
 }
 
@@ -97,7 +119,8 @@ impl TrackId {
 ///
 /// The input uses the `tonhalle-id-v0` namespace, compact UTF-8 JSON, and SHA-256.
 /// Callers must normalize the entity-specific metadata array before hashing.
-fn hash_id(kind: &str, mbid: Option<Uuid>, metadata: Value) -> String {
+fn hash_id(kind: EntityKind, mbid: Option<Uuid>, metadata: Value) -> String {
+    let kind = kind.as_str();
     let input = match mbid {
         Some(id) => json!(["tonhalle-id-v0", kind, "mbid", id.to_string()]),
         None => json!(["tonhalle-id-v0", kind, "metadata", metadata]),

@@ -84,7 +84,7 @@ impl From<&AudioFile> for models::AudioFile {
     fn from(value: &AudioFile) -> Self {
         Self {
             id: value.id().to_string(),
-            media_type: value.media_type().into(),
+            media_type: value.media_type().as_str().into(),
             playback_url: value.playback_url().as_str().to_owned(),
             sample_rate: value.sample_rate(),
             bit_depth: value.bit_depth().map_or(Nullable::Null, Nullable::Present),

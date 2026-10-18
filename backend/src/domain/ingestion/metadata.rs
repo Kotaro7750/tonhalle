@@ -2,6 +2,8 @@
 
 use std::io::Cursor;
 
+use crate::domain::primitive::audio_file::MediaType;
+
 use lofty::{
     config::ParseOptions,
     file::{AudioFile as _, FileType, TaggedFile, TaggedFileExt},
@@ -64,7 +66,7 @@ pub(crate) struct RawAudioMetadata {
     bit_depth: Option<u32>,
     /// Provides the content type detected from audio bytes.
     #[getset(get_copy = "pub(crate)")]
-    media_type: &'static str,
+    media_type: MediaType,
     /// Provides the channel count reported by the audio format.
     #[getset(get_copy = "pub(crate)")]
     channels: u32,
@@ -107,12 +109,12 @@ pub(crate) fn extract_metadata(bytes: &[u8]) -> Result<RawMetadata, ExtractMetad
         || (file.file_type() == FileType::Wav && wav_bitrate.is_some()))
     .then(|| properties.duration().as_millis());
     let media_type = match file.file_type() {
-        FileType::Wav => "audio/wav",
-        FileType::Flac => "audio/flac",
-        FileType::Aac => "audio/aac",
-        FileType::Mp4 => "audio/mp4",
-        FileType::Mpeg => "audio/mpeg",
-        FileType::Vorbis | FileType::Opus | FileType::Speex => "audio/ogg",
+        FileType::Wav => MediaType::Wav,
+        FileType::Flac => MediaType::Flac,
+        FileType::Aac => MediaType::Aac,
+        FileType::Mp4 => MediaType::Mp4,
+        FileType::Mpeg => MediaType::Mpeg,
+        FileType::Vorbis | FileType::Opus | FileType::Speex => MediaType::Ogg,
         format => return Err(ExtractMetadataError::Unsupported(format)),
     };
 

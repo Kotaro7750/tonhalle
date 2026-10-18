@@ -4,7 +4,7 @@ use crate::domain::{
     AudioFileId, ReleaseId,
     ingestion::{IngestTrackError, build_release, metadata::RawMetadata},
     primitive::{
-        audio_file::{AudioFile, AudioFileValidationError, AudioProperties},
+        audio_file::{AudioFile, AudioFileValidationError, AudioProperties, MediaType},
         release::{Release, ReleaseMetadata, ReleaseMetadataValidationError},
         track::{Track, TrackMetadata},
     },
@@ -50,7 +50,7 @@ pub(crate) fn sample_fixture() -> MetadataFixture {
             playback_url: "https://example.com/example.wav".parse().unwrap(),
             sample_rate: 44100,
             bit_depth: Some(16),
-            media_type: "audio/wav",
+            media_type: MediaType::Wav,
             channels: 2,
             bitrate: Some(1411200),
         },
@@ -93,7 +93,7 @@ pub(crate) struct AudioFixture {
     bit_depth: Option<u32>,
     /// Detected content type represented by the fixture.
     #[getset(get_copy = "pub(crate)", get_mut = "pub(crate)")]
-    media_type: &'static str,
+    media_type: MediaType,
     /// Channel count supplied to audio validation.
     #[getset(get_copy = "pub(crate)", get_mut = "pub(crate)")]
     channels: u32,

@@ -5,6 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::domain::primitive::audio_file::MediaType;
+
 use crate::port::import_source::{
     ImportCandidate, ImportSource, ListImportReleasesError, ReadImportAudioError,
 };
@@ -97,13 +99,10 @@ impl FileSystemImportSource {
 
 /// Recognizes supported container filename extensions without treating names as metadata.
 pub(crate) fn is_audio_path(path: &Path) -> bool {
-    path.extension().is_some_and(|extension| {
-        [
-            "wav", "flac", "aac", "m4a", "mp4", "ogg", "oga", "opus", "spx", "mp3",
-        ]
-        .iter()
-        .any(|supported| extension.eq_ignore_ascii_case(supported))
-    })
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(MediaType::from_extension)
+        .is_some()
 }
 
 impl FileSystemImportSource {
