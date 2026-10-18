@@ -13,7 +13,9 @@ use crate::{
         ReleaseId, TrackId,
         primitive::{release::Release, track::Track},
     },
-    port::{GetReleaseError, GetTrackError, ListReleasesError, MetadataIndex, ReleasePage},
+    port::metadata_index::{
+        GetReleaseError, GetTrackError, ListReleasesError, MetadataIndex, ReleasePage,
+    },
 };
 
 /// An identifier-ordered snapshot of accepted releases and tracks.

@@ -22,9 +22,9 @@ use crate::{
         primitive::{release::Release, track::Track},
     },
     infrastructure::{
-        metadata_index::InMemoryMetadataIndex, music_storage::FileSystemMusicStorage,
+        metadata_index::InMemoryMetadataIndex, music_storage::filesystem::FileSystemMusicStorage,
     },
-    port::{self, MetadataIndex, ReleasePage},
+    port::metadata_index::{self, MetadataIndex, ReleasePage},
     usecase::{BuildMetadataIndexUseCase, GetReleaseUseCase, GetTrackUseCase, ListReleasesUseCase},
 };
 
@@ -127,3 +127,5 @@ static CONTRACT_VALIDATORS: LazyLock<BTreeMap<&'static str, jsonschema::Validato
         })
         .collect()
     });
+
+mod import;

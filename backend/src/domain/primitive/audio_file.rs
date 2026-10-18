@@ -21,6 +21,12 @@ pub(crate) struct AudioFile {
     id: AudioFileId,
     object_key: String,
     playback_url: Url,
+    properties: AudioProperties,
+}
+
+/// Validated audio properties independent of storage identity and location.
+#[derive(Debug, Clone)]
+pub(crate) struct AudioProperties {
     media_type: &'static str,
     sample_rate: u32,
     bit_depth: Option<u32>,
@@ -29,37 +35,19 @@ pub(crate) struct AudioFile {
 }
 
 impl AudioFile {
-    /// Validates playback properties and retains the existing storage identity.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
+    /// Attaches storage identity and delivery information to validated properties.
+    pub(crate) fn from_properties(
         id: AudioFileId,
         object_key: String,
         playback_url: Url,
-        media_type: &'static str,
-        sample_rate: u32,
-        bit_depth: Option<u32>,
-        channels: u32,
-        bitrate: Option<u64>,
-    ) -> Result<Self, AudioFileValidationError> {
-        if [sample_rate, channels].contains(&0) || bit_depth == Some(0) || bitrate == Some(0) {
-            return Err(AudioFileValidationError::MissingProperties);
-        }
-
-        let bitrate = bitrate
-            .map(u32::try_from)
-            .transpose()
-            .map_err(|_| AudioFileValidationError::BitrateOverflow)?;
-
-        Ok(Self {
+        properties: AudioProperties,
+    ) -> Self {
+        Self {
             id,
             object_key,
             playback_url,
-            media_type,
-            sample_rate,
-            bit_depth,
-            channels,
-            bitrate,
-        })
+            properties,
+        }
     }
 
     /// Retains the UUID issued when the audio file was stored.
@@ -79,25 +67,73 @@ impl AudioFile {
 
     /// Provides the detected audio content type.
     pub(crate) fn media_type(&self) -> &'static str {
-        self.media_type
+        self.properties.media_type()
     }
 
     /// Provides the decoded sampling frequency in hertz.
     pub(crate) fn sample_rate(&self) -> u32 {
-        self.sample_rate
+        self.properties.sample_rate()
     }
 
     /// Provides the number of bits used for each audio sample.
     pub(crate) fn bit_depth(&self) -> Option<u32> {
-        self.bit_depth
+        self.properties.bit_depth()
     }
 
     /// Provides the channel count used to describe playback.
     pub(crate) fn channels(&self) -> u32 {
-        self.channels
+        self.properties.channels()
     }
 
     /// Provides the audio bitrate in bits per second.
+    pub(crate) fn bitrate(&self) -> Option<u32> {
+        self.properties.bitrate()
+    }
+}
+
+impl AudioProperties {
+    /// Validates audio properties through the same path for imports and stored audio.
+    pub(crate) fn new(
+        media_type: &'static str,
+        sample_rate: u32,
+        bit_depth: Option<u32>,
+        channels: u32,
+        bitrate: Option<u64>,
+    ) -> Result<Self, AudioFileValidationError> {
+        if [sample_rate, channels].contains(&0) || bit_depth == Some(0) || bitrate == Some(0) {
+            return Err(AudioFileValidationError::MissingProperties);
+        }
+
+        let bitrate = bitrate
+            .map(u32::try_from)
+            .transpose()
+            .map_err(|_| AudioFileValidationError::BitrateOverflow)?;
+
+        Ok(Self {
+            media_type,
+            sample_rate,
+            bit_depth,
+            channels,
+            bitrate,
+        })
+    }
+    /// Provides the validated media type.
+    pub(crate) fn media_type(&self) -> &'static str {
+        self.media_type
+    }
+    /// Provides the validated sample rate.
+    pub(crate) fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+    /// Provides the validated bit depth.
+    pub(crate) fn bit_depth(&self) -> Option<u32> {
+        self.bit_depth
+    }
+    /// Provides the validated channels.
+    pub(crate) fn channels(&self) -> u32 {
+        self.channels
+    }
+    /// Provides the validated bitrate.
     pub(crate) fn bitrate(&self) -> Option<u32> {
         self.bitrate
     }

@@ -7,7 +7,7 @@ use crate::{
         ReleaseId, TrackId,
         primitive::{release::Release, track::Track},
     },
-    port::{self, MetadataIndex, ReleasePage},
+    port::metadata_index::{self, MetadataIndex, ReleasePage},
 };
 
 mod build_metadata_index;
@@ -31,12 +31,12 @@ pub(crate) enum ListReleasesError {
     Internal(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl From<port::ListReleasesError> for ListReleasesError {
+impl From<metadata_index::ListReleasesError> for ListReleasesError {
     /// Converts port failures while preserving their cause and application meaning.
-    fn from(error: port::ListReleasesError) -> Self {
+    fn from(error: metadata_index::ListReleasesError) -> Self {
         match error {
-            port::ListReleasesError::InvalidCursor => Self::InvalidCursor,
-            port::ListReleasesError::Internal(error) => Self::Internal(error),
+            metadata_index::ListReleasesError::InvalidCursor => Self::InvalidCursor,
+            metadata_index::ListReleasesError::Internal(error) => Self::Internal(error),
         }
     }
 }
@@ -77,12 +77,12 @@ pub(crate) enum GetReleaseError {
     Internal(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl From<port::GetReleaseError> for GetReleaseError {
+impl From<metadata_index::GetReleaseError> for GetReleaseError {
     /// Converts port failures while preserving their cause and application meaning.
-    fn from(error: port::GetReleaseError) -> Self {
+    fn from(error: metadata_index::GetReleaseError) -> Self {
         match error {
-            port::GetReleaseError::NotFound => Self::NotFound,
-            port::GetReleaseError::Internal(error) => Self::Internal(error),
+            metadata_index::GetReleaseError::NotFound => Self::NotFound,
+            metadata_index::GetReleaseError::Internal(error) => Self::Internal(error),
         }
     }
 }
@@ -116,12 +116,12 @@ pub(crate) enum GetTrackError {
     Internal(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl From<port::GetTrackError> for GetTrackError {
+impl From<metadata_index::GetTrackError> for GetTrackError {
     /// Converts port failures while preserving their cause and application meaning.
-    fn from(error: port::GetTrackError) -> Self {
+    fn from(error: metadata_index::GetTrackError) -> Self {
         match error {
-            port::GetTrackError::NotFound => Self::NotFound,
-            port::GetTrackError::Internal(error) => Self::Internal(error),
+            metadata_index::GetTrackError::NotFound => Self::NotFound,
+            metadata_index::GetTrackError::Internal(error) => Self::Internal(error),
         }
     }
 }
@@ -137,3 +137,5 @@ impl GetTrackUseCase {
         self.index.get_track(id).await.map_err(Into::into)
     }
 }
+
+pub(crate) mod import_music;

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::{
     domain::primitive::release::{Release, ReleasesValidationError, validate_releases},
-    port::{MusicStorage, ScanReleasesError},
+    port::music_storage::{MusicStorage, ScanReleasesError},
 };
 
 /// A fatal scan or consistency failure that prevents startup index construction.
@@ -51,7 +51,7 @@ impl BuildMetadataIndexUseCase {
 mod tests {
     use super::*;
     use crate::{
-        port::ReleaseScanFailure,
+        port::music_storage::ReleaseScanFailure,
         test_support::{sample_metadata, sample_release},
     };
 
@@ -59,6 +59,17 @@ mod tests {
     struct UnavailableStorage;
 
     impl MusicStorage for UnavailableStorage {
+        /// Index-only fixtures must never receive writes.
+        fn save_release(
+            &self,
+            _: &crate::domain::import::ImportRelease,
+        ) -> Result<
+            crate::port::music_storage::SaveReleaseOutcome,
+            crate::port::music_storage::SaveReleaseError,
+        > {
+            panic!("index construction must not write music storage")
+        }
+
         /// Returns an I/O failure before individual release results are available.
         fn scan_releases(
             &self,
@@ -74,6 +85,17 @@ mod tests {
     struct FixtureStorage(Vec<Release>);
 
     impl MusicStorage for FixtureStorage {
+        /// Index-only fixtures must never receive writes.
+        fn save_release(
+            &self,
+            _: &crate::domain::import::ImportRelease,
+        ) -> Result<
+            crate::port::music_storage::SaveReleaseOutcome,
+            crate::port::music_storage::SaveReleaseError,
+        > {
+            panic!("index construction must not write music storage")
+        }
+
         /// Preserves accepted releases while reporting an independently rejected storage key.
         fn scan_releases(
             &self,

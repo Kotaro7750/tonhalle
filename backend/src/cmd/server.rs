@@ -11,21 +11,24 @@ use tower_http::{
 use crate::{
     config::ServerConfig,
     controller::MusicController,
-    infrastructure::{
-        metadata_index::InMemoryMetadataIndex, music_storage::FileSystemMusicStorage,
-    },
+    infrastructure::metadata_index::InMemoryMetadataIndex,
     usecase::{BuildMetadataIndexUseCase, GetReleaseUseCase, GetTrackUseCase, ListReleasesUseCase},
 };
 
 /// A failure to initialize or run the API server.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ServerError {
+    /// Command-specific configuration requirements are not satisfied.
+    #[error(transparent)]
+    Config(#[from] crate::config::ServerConfigError),
     /// The configured browser origin is invalid.
     #[error(transparent)]
     Cors(#[from] crate::config::CorsOriginError),
     /// Music storage cannot be initialized.
     #[error(transparent)]
-    Storage(#[from] crate::infrastructure::music_storage::FileSystemStorageConstructionError),
+    Storage(
+        #[from] crate::infrastructure::music_storage::filesystem::FileSystemContentStorageConstructionError,
+    ),
     /// Startup indexing failed.
     #[error(transparent)]
     Index(#[from] crate::usecase::BuildMetadataIndexError),
@@ -39,12 +42,10 @@ pub(crate) enum ServerError {
 
 /// Builds the startup index and serves the configured API until shutdown.
 pub(crate) async fn run(config: ServerConfig) -> Result<(), ServerError> {
+    config.validate()?;
     let cors_origin = config.cors_origin()?;
 
-    let storage = Arc::new(FileSystemMusicStorage::new(
-        config.content_storage().root_path().to_path_buf(),
-        config.content_storage().playback_url_base().clone(),
-    )?);
+    let storage = config.content_storage().construct_music_storage()?;
 
     tracing::info!("Scanning music storage");
     let releases =

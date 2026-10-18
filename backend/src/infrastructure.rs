@@ -2,3 +2,5 @@
 
 pub(crate) mod metadata_index;
 pub(crate) mod music_storage;
+
+pub(crate) mod import_source;

@@ -410,7 +410,7 @@ async fn music_api_indexes_supported_formats_with_detected_types_and_optional_bi
             "https://media.example.com/".parse().unwrap(),
         )
         .unwrap();
-        let scanned = crate::port::MusicStorage::scan_releases(&storage).unwrap();
+        let scanned = crate::port::music_storage::MusicStorage::scan_releases(&storage).unwrap();
         assert_eq!(scanned.len(), 1);
         assert!(scanned[0].is_err(), "{extension}");
     }

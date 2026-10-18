@@ -1,8 +1,9 @@
 //! Defines command-line inputs and subcommand startup handlers.
 
+pub(crate) mod import;
 pub(crate) mod server;
 
-use crate::config::ServerConfig;
+use crate::config::{ImportConfig, ServerConfig};
 use clap::{Parser, Subcommand};
 
 /// Command-line interface for backend operations.
@@ -19,4 +20,6 @@ pub(crate) struct Cli {
 pub(crate) enum Command {
     /// Start the API server.
     Server(ServerConfig),
+    /// Import audio releases without updating the metadata index.
+    Import(ImportConfig),
 }

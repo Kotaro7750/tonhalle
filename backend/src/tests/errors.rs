@@ -74,22 +74,22 @@ impl MetadataIndex for FailingIndex {
         &self,
         _: u8,
         _: Option<String>,
-    ) -> Result<ReleasePage, port::ListReleasesError> {
-        Err(port::ListReleasesError::Internal(Box::new(
+    ) -> Result<ReleasePage, metadata_index::ListReleasesError> {
+        Err(metadata_index::ListReleasesError::Internal(Box::new(
             std::io::Error::other("secret filesystem path"),
         )))
     }
 
     /// Simulates an internal release lookup failure with private infrastructure details.
-    async fn get_release(&self, _: &ReleaseId) -> Result<Release, port::GetReleaseError> {
-        Err(port::GetReleaseError::Internal(Box::new(
+    async fn get_release(&self, _: &ReleaseId) -> Result<Release, metadata_index::GetReleaseError> {
+        Err(metadata_index::GetReleaseError::Internal(Box::new(
             std::io::Error::other("secret filesystem path"),
         )))
     }
 
     /// Simulates an internal track lookup failure with private infrastructure details.
-    async fn get_track(&self, _: &TrackId) -> Result<Track, port::GetTrackError> {
-        Err(port::GetTrackError::Internal(Box::new(
+    async fn get_track(&self, _: &TrackId) -> Result<Track, metadata_index::GetTrackError> {
+        Err(metadata_index::GetTrackError::Internal(Box::new(
             std::io::Error::other("secret filesystem path"),
         )))
     }

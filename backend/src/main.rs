@@ -19,6 +19,7 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         cmd::Command::Server(config) => cmd::server::run(config).await?,
+        cmd::Command::Import(config) => cmd::import::run(config).await?,
     }
     Ok(())
 }

@@ -3,7 +3,7 @@
 use tonhalle_api::{models, types::Nullable};
 
 use crate::domain::primitive::{audio_file::AudioFile, release::Release, track::Track};
-use crate::{domain, port};
+use crate::{domain, port::metadata_index};
 
 impl From<&domain::ArtistCredit> for models::ArtistCredit {
     /// Preserves artist display spelling and represents absent separators as JSON null.
@@ -94,9 +94,9 @@ impl From<&AudioFile> for models::AudioFile {
     }
 }
 
-impl From<port::ReleasePage> for models::ReleasePage {
+impl From<metadata_index::ReleasePage> for models::ReleasePage {
     /// Builds a release page and omits the continuation token at the end.
-    fn from(value: port::ReleasePage) -> Self {
+    fn from(value: metadata_index::ReleasePage) -> Self {
         Self {
             items: value.items().iter().map(Into::into).collect(),
             next_cursor: value.next_cursor().map(str::to_owned),

@@ -4,9 +4,9 @@ use crate::domain::{
     AudioFileId, ReleaseId,
     ingestion::{IngestTrackError, build_release, metadata::RawMetadata},
     primitive::{
-        audio_file::{AudioFile, AudioFileValidationError},
+        audio_file::{AudioFile, AudioFileValidationError, AudioProperties},
         release::{Release, ReleaseMetadata, ReleaseMetadataValidationError},
-        track::Track,
+        track::{Track, TrackMetadata},
     },
 };
 
@@ -84,16 +84,19 @@ pub(crate) struct AudioFixture {
 impl AudioFixture {
     /// Builds stored audio through its validating constructor.
     pub(crate) fn build(&self) -> Result<AudioFile, AudioFileValidationError> {
-        AudioFile::new(
-            self.id,
-            self.object_key.clone(),
-            self.playback_url.clone(),
+        let properties = AudioProperties::new(
             self.media_type,
             self.sample_rate,
             self.bit_depth,
             self.channels,
             self.bitrate,
-        )
+        )?;
+        Ok(AudioFile::from_properties(
+            self.id,
+            self.object_key.clone(),
+            self.playback_url.clone(),
+            properties,
+        ))
     }
 }
 
@@ -168,7 +171,7 @@ impl MetadataFixture {
         let metadata = self.build_release_metadata()?;
         let audio = self.audio_file.build()?;
 
-        let track = Track::new(
+        let track_metadata = TrackMetadata::new(
             release_id,
             &self.track_title,
             &self.disc_number,
@@ -176,10 +179,9 @@ impl MetadataFixture {
             self.duration_ms,
             &self.track_artists.names,
             &self.track_artists.mbids,
-            audio,
         )?;
 
-        Ok((track, metadata))
+        Ok((Track::new(track_metadata, audio), metadata))
     }
 
     /// Ingests fixture WAV bytes with separately supplied storage information.

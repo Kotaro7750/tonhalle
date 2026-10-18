@@ -7,11 +7,11 @@ use url::Url;
 use crate::domain::{
     AudioFileId, ReleaseId,
     primitive::{
-        audio_file::{AudioFile, AudioFileValidationError},
+        audio_file::{AudioFile, AudioFileValidationError, AudioProperties},
         release::{
             Release, ReleaseMetadata, ReleaseMetadataValidationError, ReleaseValidationError,
         },
-        track::{Track, TrackValidationError},
+        track::{Track, TrackMetadata, TrackValidationError},
     },
 };
 use metadata::ExtractMetadataError;
@@ -44,44 +44,60 @@ pub(crate) fn ingest_track(
     playback_url: Url,
     release_id: &ReleaseId,
 ) -> Result<(Track, ReleaseMetadata), IngestTrackError> {
-    let raw = metadata::extract_metadata(bytes)?;
+    let parsed = parse_audio(bytes)?;
+    if parsed.release_metadata.id() != release_id {
+        return Err(IngestTrackError::ReleaseIdMismatch {
+            actual: parsed.release_metadata.id().clone(),
+        });
+    }
+    let audio =
+        AudioFile::from_properties(audio_file_id, object_key, playback_url, parsed.properties);
+    Ok((
+        Track::new(parsed.track_metadata, audio),
+        parsed.release_metadata,
+    ))
+}
 
-    let metadata = ReleaseMetadata::new(
+/// Validated embedded metadata and audio properties without stored entities.
+pub(crate) struct ParsedAudio {
+    /// Describes the track and its metadata-derived identity.
+    pub(crate) track_metadata: TrackMetadata,
+    /// Describes the release identified by the embedded tags.
+    pub(crate) release_metadata: ReleaseMetadata,
+    /// Describes audio independently of its storage location.
+    pub(crate) properties: AudioProperties,
+}
+
+/// Extracts and validates audio without requiring stored identity or playback links.
+pub(crate) fn parse_audio(bytes: &[u8]) -> Result<ParsedAudio, IngestTrackError> {
+    let raw = metadata::extract_metadata(bytes)?;
+    let release_metadata = ReleaseMetadata::new(
         raw.release_title(),
         raw.release_date(),
         raw.release_credit().names(),
         raw.release_credit().mbids(),
     )?;
-
-    if metadata.id() != release_id {
-        return Err(IngestTrackError::ReleaseIdMismatch {
-            actual: metadata.id().clone(),
-        });
-    }
-
-    let audio_file = AudioFile::new(
-        audio_file_id,
-        object_key,
-        playback_url,
+    let properties = AudioProperties::new(
         raw.audio().media_type(),
         raw.audio().sample_rate(),
         raw.audio().bit_depth(),
         raw.audio().channels(),
         raw.audio().bitrate(),
     )?;
-
-    let track = Track::new(
-        release_id,
+    let track_metadata = TrackMetadata::new(
+        release_metadata.id(),
         raw.track_title(),
         raw.disc_number(),
         raw.track_number(),
         raw.audio().duration_ms(),
         raw.track_credit().names(),
         raw.track_credit().mbids(),
-        audio_file,
     )?;
-
-    Ok((track, metadata))
+    Ok(ParsedAudio {
+        track_metadata,
+        release_metadata,
+        properties,
+    })
 }
 
 /// Constructs one release after all of its audio sources have been parsed successfully.

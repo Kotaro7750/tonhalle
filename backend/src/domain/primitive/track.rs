@@ -26,9 +26,9 @@ pub(crate) enum TrackValidationError {
     ArtistCredits(#[from] ArtistCreditValidationError),
 }
 
-/// A release track with its accepted original audio file.
+/// Validated track metadata independent of stored audio identity and location.
 #[derive(Debug, Clone)]
-pub(crate) struct Track {
+pub(crate) struct TrackMetadata {
     id: TrackId,
     release_id: ReleaseId,
     title: String,
@@ -36,12 +36,10 @@ pub(crate) struct Track {
     track_number: u32,
     duration_ms: Option<u32>,
     artist_credits: Vec<ArtistCredit>,
-    original_audio_file: AudioFile,
 }
 
-impl Track {
+impl TrackMetadata {
     /// Validates track fields and derives an identity while preserving display values.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         release_id: &ReleaseId,
         title: &str,
@@ -50,7 +48,6 @@ impl Track {
         duration_ms: Option<u128>,
         artist_names: &[String],
         artist_mbids: &[String],
-        original_audio_file: AudioFile,
     ) -> Result<Self, TrackValidationError> {
         let normalized_title =
             normalization::required(title).ok_or(TrackValidationError::MissingTitle)?;
@@ -78,7 +75,6 @@ impl Track {
             track_number,
             duration_ms,
             artist_credits,
-            original_audio_file,
         })
     }
 
@@ -116,8 +112,60 @@ impl Track {
     pub(crate) fn artist_credits(&self) -> &[ArtistCredit] {
         &self.artist_credits
     }
+}
 
-    /// Exposes the original accepted during duplicate exclusion.
+/// A release track associated with its stored original audio file.
+#[derive(Debug, Clone)]
+pub(crate) struct Track {
+    metadata: TrackMetadata,
+    original_audio_file: AudioFile,
+}
+
+impl Track {
+    /// Combines validated track metadata with its stored original audio.
+    pub(crate) fn new(metadata: TrackMetadata, original_audio_file: AudioFile) -> Self {
+        Self {
+            metadata,
+            original_audio_file,
+        }
+    }
+
+    /// Identifies the track from its normalized release and track metadata.
+    pub(crate) fn id(&self) -> &TrackId {
+        self.metadata.id()
+    }
+
+    /// Connects this track to the release used during identity generation.
+    pub(crate) fn release_id(&self) -> &ReleaseId {
+        self.metadata.release_id()
+    }
+
+    /// Preserves the track title supplied by the source metadata.
+    pub(crate) fn title(&self) -> &str {
+        self.metadata.title()
+    }
+
+    /// Provides the validated disc position for release ordering.
+    pub(crate) fn disc_number(&self) -> u32 {
+        self.metadata.disc_number()
+    }
+
+    /// Provides the validated track position within its disc.
+    pub(crate) fn track_number(&self) -> u32 {
+        self.metadata.track_number()
+    }
+
+    /// Provides playback duration in milliseconds, including valid zero durations.
+    pub(crate) fn duration_ms(&self) -> Option<u32> {
+        self.metadata.duration_ms()
+    }
+
+    /// Keeps track credits separate from release credits.
+    pub(crate) fn artist_credits(&self) -> &[ArtistCredit] {
+        self.metadata.artist_credits()
+    }
+
+    /// Provides the original audio retained during index construction.
     pub(crate) fn original_audio_file(&self) -> &AudioFile {
         &self.original_audio_file
     }
@@ -142,7 +190,7 @@ mod tests {
     use crate::test_support::sample_fixture;
 
     #[test]
-    fn track_new_requires_positive_positions_and_ignores_totals() {
+    fn track_metadata_new_requires_positive_positions_and_ignores_totals() {
         let mut fixture = sample_fixture();
         let release = fixture.build_release_metadata().unwrap();
 
@@ -188,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn track_new_rejects_missing_titles_and_artist_credits() {
+    fn track_metadata_new_rejects_missing_titles_and_artist_credits() {
         let release = sample_fixture().build_release_metadata().unwrap();
 
         for field in ["title", "credits", "artist_name"] {
@@ -223,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn track_new_accepts_zero_duration_and_rejects_duration_overflow() {
+    fn track_metadata_new_accepts_zero_duration_and_rejects_duration_overflow() {
         let mut fixture = sample_fixture();
         let release = fixture.build_release_metadata().unwrap();
 

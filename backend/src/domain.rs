@@ -8,3 +8,5 @@ pub(crate) mod primitive;
 
 pub(crate) use artist_credit::ArtistCredit;
 pub(crate) use id::{ArtistId, AudioFileId, ReleaseId, TrackId};
+
+pub(crate) mod import;
