@@ -5,7 +5,10 @@ use clap::Args;
 use std::net::{IpAddr, SocketAddr};
 use url::{ParseError as UrlParseError, Url};
 
-use crate::config::music_storage::{MusicStorageConfig, MusicStorageConfigError};
+use crate::config::{
+    authorization::{AuthorizationConfig, AuthorizationError},
+    music_storage::{MusicStorageConfig, MusicStorageConfigError},
+};
 
 /// A failure to validate the configured browser origin.
 #[derive(Debug, thiserror::Error)]
@@ -24,6 +27,10 @@ pub(crate) enum CorsOriginError {
 /// Server settings parsed from CLI arguments or the TONHALLE environment namespace.
 #[derive(getset::Getters, Debug, Args)]
 pub(crate) struct ServerConfig {
+    /// Optional OAuth access-token validation settings.
+    #[command(flatten)]
+    #[getset(get = "pub(crate)")]
+    authorization: AuthorizationConfig,
     /// IP interface used by the HTTP listener.
     #[arg(
         long = "listen-address",
@@ -50,6 +57,9 @@ pub(crate) struct ServerConfig {
 /// A failure to validate settings needed by the HTTP server.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ServerConfigError {
+    /// Authorization settings are incomplete.
+    #[error(transparent)]
+    Authorization(#[from] AuthorizationError),
     /// Browser-origin configuration is invalid.
     #[error(transparent)]
     Cors(#[from] CorsOriginError),
@@ -64,6 +74,7 @@ pub(crate) enum ServerConfigError {
 impl ServerConfig {
     /// Validates command-specific requirements before initializing server resources.
     pub(crate) fn validate(&self) -> Result<(), ServerConfigError> {
+        self.authorization.validate()?;
         self.cors_origin()?;
         self.music_storage.validate()?;
         self.music_storage
@@ -143,6 +154,7 @@ mod tests {
         for mode in [MusicStorageMode::Filesystem, MusicStorageMode::S3] {
             for url in [None, Some("https://example.com/audio")] {
                 let config = ServerConfig {
+                    authorization: AuthorizationConfig::default(),
                     listen_address: "127.0.0.1".parse().unwrap(),
                     listen_port: 3000,
                     cors_origin: None,

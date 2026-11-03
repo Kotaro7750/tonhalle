@@ -1,6 +1,13 @@
 //! Initializes storage and serves the HTTP API.
 
-use axum::{Router, http::Method, routing::get};
+use axum::{
+    Router,
+    http::{
+        HeaderValue, Method,
+        header::{AUTHORIZATION, CONTENT_TYPE},
+    },
+    routing::get,
+};
 use std::{io::Error as IoError, net::SocketAddr, sync::Arc};
 use tokio::{net::TcpListener, signal::ctrl_c};
 use tower_http::{
@@ -10,6 +17,7 @@ use tower_http::{
 
 use crate::{
     config::{
+        authorization::AuthorizationError,
         music_storage::MusicStorageConfigError,
         server::{CorsOriginError, ServerConfig, ServerConfigError},
     },
@@ -24,6 +32,9 @@ use crate::{
 /// A failure to initialize or run the API server.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ServerError {
+    /// Provider signing keys cannot be loaded.
+    #[error(transparent)]
+    Authorization(#[from] AuthorizationError),
     /// Command-specific configuration requirements are not satisfied.
     #[error(transparent)]
     Config(#[from] ServerConfigError),
@@ -66,22 +77,12 @@ pub(crate) async fn run(config: &ServerConfig) -> Result<(), ServerError> {
         GetTrackUseCase::new(index),
     );
 
-    let mut app = Router::new()
-        .nest("/api/v0", controller.router())
-        .route("/health", get(|| async { "OK" }))
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(DefaultMakeSpan::new().level(tracing::Level::INFO))
-                .on_response(DefaultOnResponse::new().level(tracing::Level::INFO)),
-        );
+    let api = config
+        .authorization()
+        .protect_api(controller.router())
+        .await?;
 
-    if let Some(origin) = cors_origin {
-        app = app.layer(
-            CorsLayer::new()
-                .allow_origin(origin)
-                .allow_methods([Method::GET, Method::HEAD]),
-        );
-    }
+    let app = build_app(api, cors_origin);
 
     let listener = TcpListener::bind(config.listen_address()).await?;
     tracing::info!(address = %listener.local_addr()?, "Tonhalle server listening");
@@ -94,6 +95,29 @@ pub(crate) async fn run(config: &ServerConfig) -> Result<(), ServerError> {
     .await?;
 
     Ok(())
+}
+
+/// Mounts protected API routes alongside public health and CORS handling.
+pub(crate) fn build_app(api: Router, cors_origin: Option<HeaderValue>) -> Router {
+    let mut app = Router::new()
+        .nest("/api/v0", api)
+        .route("/health", get(|| async { "OK" }))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().level(tracing::Level::INFO))
+                .on_response(DefaultOnResponse::new().level(tracing::Level::INFO)),
+        );
+
+    if let Some(origin) = cors_origin {
+        app = app.layer(
+            CorsLayer::new()
+                .allow_origin(origin)
+                .allow_methods([Method::GET, Method::HEAD])
+                .allow_headers([AUTHORIZATION, CONTENT_TYPE]),
+        );
+    }
+
+    app
 }
 
 /// Waits for Ctrl+C or SIGTERM to initiate graceful shutdown.

@@ -5,6 +5,10 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
+aliri = "0.6.4"
+aliri_clock = "0.1.4"
+aliri_oauth2 = { version = "0.10.2", default-features = false, features = ["reqwest", "rsa", "rustls-tls", "tokio"] }
+aliri_tower = "0.6.1"
 anyhow = "1"
 async-trait = "0.1"
 aws-config = "1"

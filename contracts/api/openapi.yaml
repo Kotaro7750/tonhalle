@@ -9,7 +9,10 @@ info:
 servers:
   - url: "http://localhost:3000/api/v0"
     description: "Local development server"
-security: []
+# Authentication is optional at deployment; enabled servers require BearerAuth.
+security:
+  - {}
+  - BearerAuth: []
 tags:
   - name: "Releases"
     description: "リリースに関連するAPI"
@@ -29,6 +32,8 @@ paths:
         - "$ref": "#/components/parameters/Cursor"
         - "$ref": "#/components/parameters/PageLimit"
       responses:
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
         "200":
           description: "リリース一覧の取得に成功した"
           content:
@@ -77,6 +82,8 @@ paths:
       parameters:
         - "$ref": "#/components/parameters/ReleaseId"
       responses:
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
         "200":
           description: "リリース詳細の取得に成功した"
           content:
@@ -121,6 +128,8 @@ paths:
       parameters:
         - "$ref": "#/components/parameters/TrackId"
       responses:
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
         "200":
           description: "トラック詳細の取得に成功した"
           content:
@@ -156,6 +165,12 @@ paths:
         "500":
           "$ref": "#/components/responses/InternalServerError"
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "認証を有効にしたサーバーでは全APIにOAuth 2.0アクセストークンが必要。issuer・audience・RS256署名・有効期限を検証する。"
   parameters:
     Cursor:
       name: "cursor"
@@ -490,6 +505,12 @@ components:
               type: "integer"
               const: 500
   responses:
+    Unauthorized:
+      description: "認証有効時、Bearerアクセストークンが未指定または不正である"
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
     BadRequest:
       description: "識別子の形式、カーソル、またはlimitが不正である"
       content:

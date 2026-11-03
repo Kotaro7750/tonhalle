@@ -12,6 +12,8 @@ use crate::{models, types::*};
 #[must_use]
 #[allow(clippy::large_enum_variant)]
 pub enum GetTrackResponse {
+    /// 認証有効時、Bearerアクセストークンが未指定または不正である
+    Status401 { www_authenticate: Option<String> },
     /// トラック詳細の取得に成功した
     Status200(models::Track),
     /// 識別子の形式、カーソル、またはlimitが不正である
@@ -26,6 +28,8 @@ pub enum GetTrackResponse {
 #[async_trait]
 #[allow(clippy::ptr_arg)]
 pub trait Tracks<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::ErrorHandler<E> {
+    type Claims;
+
     /// トラック詳細の取得.
     ///
     /// GetTrack - GET /api/v0/tracks/{trackId}
@@ -35,6 +39,7 @@ pub trait Tracks<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::ErrorH
         method: &Method,
         host: &Host,
         cookies: &CookieJar,
+        claims: &Self::Claims,
         path_params: &models::GetTrackPathParams,
     ) -> Result<GetTrackResponse, E>;
 }

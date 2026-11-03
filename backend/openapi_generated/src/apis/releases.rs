@@ -12,6 +12,8 @@ use crate::{models, types::*};
 #[must_use]
 #[allow(clippy::large_enum_variant)]
 pub enum GetReleaseResponse {
+    /// 認証有効時、Bearerアクセストークンが未指定または不正である
+    Status401 { www_authenticate: Option<String> },
     /// リリース詳細の取得に成功した
     Status200(models::Release),
     /// 識別子の形式、カーソル、またはlimitが不正である
@@ -26,6 +28,8 @@ pub enum GetReleaseResponse {
 #[must_use]
 #[allow(clippy::large_enum_variant)]
 pub enum ListReleasesResponse {
+    /// 認証有効時、Bearerアクセストークンが未指定または不正である
+    Status401 { www_authenticate: Option<String> },
     /// リリース一覧の取得に成功した
     Status200(models::ReleasePage),
     /// 識別子の形式、カーソル、またはlimitが不正である
@@ -40,6 +44,8 @@ pub enum ListReleasesResponse {
 pub trait Releases<E: std::fmt::Debug + Send + Sync + 'static = ()>:
     super::ErrorHandler<E>
 {
+    type Claims;
+
     /// リリース詳細の取得.
     ///
     /// GetRelease - GET /api/v0/releases/{releaseId}
@@ -49,6 +55,7 @@ pub trait Releases<E: std::fmt::Debug + Send + Sync + 'static = ()>:
         method: &Method,
         host: &Host,
         cookies: &CookieJar,
+        claims: &Self::Claims,
         path_params: &models::GetReleasePathParams,
     ) -> Result<GetReleaseResponse, E>;
 
@@ -61,6 +68,7 @@ pub trait Releases<E: std::fmt::Debug + Send + Sync + 'static = ()>:
         method: &Method,
         host: &Host,
         cookies: &CookieJar,
+        claims: &Self::Claims,
         query_params: &models::ListReleasesQueryParams,
     ) -> Result<ListReleasesResponse, E>;
 }

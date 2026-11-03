@@ -230,3 +230,23 @@ fn storage_modes_validate_selected_settings_and_reject_unknown_modes() {
         String::from_utf8_lossy(&missing_source.stderr).contains("selected import source mode")
     );
 }
+
+#[test]
+fn server_authorization_requires_provider_settings_and_allows_cli_disable() {
+    let root = tempfile::tempdir().unwrap();
+    let env = [
+        (
+            "TONHALLE_MUSIC_STORAGE__ROOT_PATH",
+            root.path().to_str().unwrap(),
+        ),
+        ("TONHALLE_AUTHORIZATION__ENABLED", "true"),
+    ];
+    let output = run(&["server"], &env);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("authorization.issuer"));
+    let output = run(&["server", "--authorization-enabled", "false"], &env);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(!stderr.contains("authorization.issuer"), "{stderr}");
+    assert!(stderr.contains("playback_url_base"), "{stderr}");
+}

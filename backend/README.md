@@ -53,7 +53,7 @@ When running from source, use `cargo run --locked --` in the `backend/` director
 
 Provide settings through CLI arguments or environment variables.
 CLI arguments take precedence over environment variables, followed by defaults.
-Argument names omit `TONHALLE_`, use lowercase, and replace each underscore with a hyphen.
+Unless listed otherwise below, argument names omit `TONHALLE_`, use lowercase, and replace each underscore with a hyphen.
 
 | Variable | CLI argument | Commands | Required | Default | Description |
 | --- | --- | --- | --- | --- | --- |
@@ -67,6 +67,27 @@ CORS is disabled when no origin is provided.
 | Variable | CLI argument | Commands | Required | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | `TONHALLE_CORS_ORIGIN` | `--cors-origin` | `server` | No | - | A single HTTP(S) browser origin without a path or trailing slash. |
+
+### OAuth 2.0 Authorization
+
+Authorization is disabled by default.
+When enabled, all routes under `/api/v0` require an OAuth 2.0 Bearer access token; `/health` remains public.
+Tokens are issued by an external identity provider and validated using RS256 signatures, the configured issuer and audience, and expiration.
+Signing keys are retrieved from the provider's JWKS endpoint at startup and refreshed hourly.
+The server fails to start if required authorization settings are missing or the initial JWKS retrieval fails.
+
+| Variable | CLI argument | Commands | Required | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `TONHALLE_AUTHORIZATION__ENABLED` | `--authorization-enabled` | `server` | No | `false` | Enables access-token validation; accepts `true` or `false`. |
+| `TONHALLE_AUTHORIZATION__ISSUER` | `--authorization-issuer` | `server` | When enabled | - | Required token issuer (`iss`). |
+| `TONHALLE_AUTHORIZATION__AUDIENCE` | `--authorization-audience` | `server` | When enabled | - | Required token audience (`aud`). |
+| `TONHALLE_AUTHORIZATION__JWKS_URL` | `--authorization-jwks-url` | `server` | When enabled | - | Provider's JWKS endpoint URL. |
+
+Missing or invalid tokens return `401 Unauthorized`.
+For Cognito tokens, `token_use` must be `access`; tokens without this claim are also accepted.
+Endpoint-specific scope or role checks are not configured.
+For cross-origin browser requests, also configure `TONHALLE_CORS_ORIGIN`; CORS permits the `Authorization` header.
+Audio delivery uses a separate endpoint, whose access control must be configured independently.
 
 ### Music Storage
 
