@@ -1,6 +1,7 @@
 //! Builds the startup index from storage releases after domain consistency validation.
 
 use std::sync::Arc;
+use tokio::task::{JoinError, spawn_blocking};
 
 use crate::{
     domain::primitive::release::{Release, ReleasesValidationError, validate_releases},
@@ -10,6 +11,9 @@ use crate::{
 /// A fatal scan or consistency failure that prevents startup index construction.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum BuildMetadataIndexError {
+    /// The domain consistency validation worker failed.
+    #[error(transparent)]
+    Worker(#[from] JoinError),
     /// Storage enumeration did not complete.
     #[error(transparent)]
     Scan(#[from] ScanReleasesError),
@@ -30,19 +34,21 @@ impl BuildMetadataIndexUseCase {
     }
 
     /// Reports individual scan failures and validates the accepted collection through Domain.
-    pub(crate) fn execute(&self) -> Result<Vec<Release>, BuildMetadataIndexError> {
+    pub(crate) async fn execute(&self) -> Result<Vec<Release>, BuildMetadataIndexError> {
         let mut releases = Vec::new();
 
-        for result in self.storage.scan_releases()? {
+        for result in self.storage.scan_releases().await? {
             match result {
                 Ok(release) => releases.push(release),
                 Err(failure) => tracing::warn!(?failure, "Storage release rejected"),
             }
         }
 
-        validate_releases(&releases)?;
-
-        Ok(releases)
+        spawn_blocking(move || {
+            validate_releases(&releases)?;
+            Ok(releases)
+        })
+        .await?
     }
 }
 
@@ -65,14 +71,18 @@ mod tests {
     /// Simulates a fatal storage enumeration failure.
     struct UnavailableStorage;
 
+    #[async_trait::async_trait]
     impl MusicStorage for UnavailableStorage {
         /// Index-only fixtures must never receive writes.
-        fn save_release(&self, _: &ImportRelease) -> Result<SaveReleaseOutcome, SaveReleaseError> {
+        async fn save_release(
+            &self,
+            _: &ImportRelease,
+        ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
             panic!("index construction must not write music storage")
         }
 
         /// Returns an I/O failure before individual release results are available.
-        fn scan_releases(
+        async fn scan_releases(
             &self,
         ) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError> {
             Err(ScanReleasesError::new(IoError::new(
@@ -85,14 +95,18 @@ mod tests {
     /// Supplies accepted releases alongside an individual storage scan failure.
     struct FixtureStorage(Vec<Release>);
 
+    #[async_trait::async_trait]
     impl MusicStorage for FixtureStorage {
         /// Index-only fixtures must never receive writes.
-        fn save_release(&self, _: &ImportRelease) -> Result<SaveReleaseOutcome, SaveReleaseError> {
+        async fn save_release(
+            &self,
+            _: &ImportRelease,
+        ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
             panic!("index construction must not write music storage")
         }
 
         /// Preserves accepted releases while reporting an independently rejected storage key.
-        fn scan_releases(
+        async fn scan_releases(
             &self,
         ) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError> {
             let mut results = self.0.iter().cloned().map(Ok).collect::<Vec<_>>();
@@ -106,10 +120,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn execute_preserves_the_cause_of_scan_failures() {
+    #[tokio::test]
+    async fn execute_preserves_the_cause_of_scan_failures() {
         let error = BuildMetadataIndexUseCase::new(Arc::new(UnavailableStorage))
             .execute()
+            .await
             .unwrap_err();
 
         assert!(
@@ -121,28 +136,30 @@ mod tests {
         );
     }
 
-    #[test]
-    fn execute_keeps_valid_releases_when_individual_candidates_fail() {
+    #[tokio::test]
+    async fn execute_keeps_valid_releases_when_individual_candidates_fail() {
         let release = sample_release(&sample_metadata());
 
         let accepted =
             BuildMetadataIndexUseCase::new(Arc::new(FixtureStorage(vec![release.clone()])))
                 .execute()
+                .await
                 .unwrap();
 
         assert_eq!(accepted.len(), 1);
         assert_eq!(accepted[0].id(), release.id());
     }
 
-    #[test]
-    fn execute_propagates_collection_conflicts() {
+    #[tokio::test]
+    async fn execute_propagates_collection_conflicts() {
         let release = sample_release(&sample_metadata());
         assert!(matches!(
             BuildMetadataIndexUseCase::new(Arc::new(FixtureStorage(vec![
                 release.clone(),
                 release
             ])))
-            .execute(),
+            .execute()
+            .await,
             Err(BuildMetadataIndexError::InconsistentReleases(
                 ReleasesValidationError::DuplicateRelease { .. }
             ))

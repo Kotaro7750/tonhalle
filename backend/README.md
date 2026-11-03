@@ -33,7 +33,7 @@ tonhalle-backend import \
   --music-storage--root-path /path/to/storage
 ```
 
-Each release is validated and saved as a whole.
+Each release is validated before saving.
 Existing releases are skipped without being overwritten.
 If a release fails, the remaining releases are still processed.
 The command prints `saved`, `skipped`, and `failed` counts and exits with a nonzero status if any release failed.
@@ -73,18 +73,42 @@ CORS is disabled when no origin is provided.
 #### Common
 
 Select the music-storage implementation with `--music-storage--mode`.
-Currently, `filesystem` is supported.
+Supported values are `filesystem` and `s3`.
+Playback settings are shared by all implementations.
+Implementation-specific settings are required and validated only for the selected implementation.
 
 | Variable | CLI argument | Commands | Required | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | `TONHALLE_MUSIC_STORAGE__MODE` | `--music-storage--mode` | `server`, `import` | No | `filesystem` | Music-storage implementation. |
+| `TONHALLE_MUSIC_STORAGE__PLAYBACK_URL_BASE` | `--music-storage--playback-url-base` | `server`, `import` | Only for `server` | - | HTTP(S) delivery directory corresponding to the filesystem root or S3 bucket root; query strings and fragments are rejected. |
 
 #### Filesystem
 
 | Variable | CLI argument | Commands | Required | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | `TONHALLE_MUSIC_STORAGE__ROOT_PATH` | `--music-storage--root-path` | `server`, `import` | Yes | - | Existing filesystem directory scanned by `server` and written to by `import`. Mount it when using a container. |
-| `TONHALLE_MUSIC_STORAGE__PLAYBACK_URL_BASE` | `--music-storage--playback-url-base` | `server`, `import` | Only for `server` | - | HTTP(S) base URL for playback links; query strings and fragments are rejected. |
+
+#### S3
+
+| Variable | CLI argument | Commands | Required | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `TONHALLE_MUSIC_STORAGE__S3__REGION` | `--music-storage--s3--region` | `server`, `import` | Yes | - | AWS region for S3 requests. |
+| `TONHALLE_MUSIC_STORAGE__S3__BUCKET_NAME` | `--music-storage--s3--bucket-name` | `server`, `import` | Yes | - | Existing bucket holding audio objects. |
+| `TONHALLE_MUSIC_STORAGE__S3__PREFIX` | `--music-storage--s3--prefix` | `server`, `import` | No | Empty | Object-key prefix without leading/trailing slashes, empty segments, or `.` / `..` segments. |
+
+Credentials are loaded through the AWS SDK's standard credential provider chain, such as environment variables, shared AWS profiles, or IAM roles.
+The bucket must allow listing objects, reading audio for `server`, and writing audio for `import`.
+
+Audio objects are stored at `{prefix}/{ReleaseId}/{AudioFileId}.{extension}`; an empty prefix omits the initial `{prefix}/`.
+Playback URLs append the complete object key to the configured playback URL base.
+For example, prefix `music` and base `https://example.com/` produce `https://example.com/music/{ReleaseId}/{AudioFileId}.{extension}`.
+Configure the delivery endpoint to serve those object keys.
+
+S3 saves are best effort and use no management objects.
+Concurrent updates are not coordinated.
+A failed save may leave a partial release that is visible to scans.
+If any object already exists under that release's prefix, a later import skips the release, including partially saved releases.
+To retry an incomplete release, remove its partial objects before importing again.
 
 ### Import Source
 

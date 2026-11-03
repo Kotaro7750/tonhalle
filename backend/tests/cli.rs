@@ -152,7 +152,7 @@ fn storage_config_accepts_optional_playback_url_but_server_requires_it() {
     assert!(!server.status.success());
     assert!(
         String::from_utf8_lossy(&server.stderr)
-            .contains("FileSystemMusicStorageConfig.playback_url_base is required")
+            .contains("MusicStorageConfig.playback_url_base is required")
     );
     let import_args = [
         "import",

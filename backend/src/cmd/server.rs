@@ -2,11 +2,7 @@
 
 use axum::{Router, http::Method, routing::get};
 use std::{io::Error as IoError, net::SocketAddr, sync::Arc};
-use tokio::{
-    net::TcpListener,
-    signal::ctrl_c,
-    task::{JoinError, spawn_blocking},
-};
+use tokio::{net::TcpListener, signal::ctrl_c};
 use tower_http::{
     cors::CorsLayer,
     trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer},
@@ -40,9 +36,6 @@ pub(crate) enum ServerError {
     /// Startup indexing failed.
     #[error(transparent)]
     Index(#[from] BuildMetadataIndexError),
-    /// The indexing worker failed.
-    #[error(transparent)]
-    Worker(#[from] JoinError),
     /// Network or server I/O failed.
     #[error(transparent)]
     Io(#[from] IoError),
@@ -53,11 +46,10 @@ pub(crate) async fn run(config: &ServerConfig) -> Result<(), ServerError> {
     config.validate()?;
     let cors_origin = config.cors_origin()?;
 
-    let storage = config.music_storage().construct_music_storage()?;
+    let storage = config.music_storage().construct_music_storage().await?;
 
     tracing::info!("Scanning music storage");
-    let releases =
-        spawn_blocking(move || BuildMetadataIndexUseCase::new(storage).execute()).await??;
+    let releases = BuildMetadataIndexUseCase::new(storage).execute().await?;
     tracing::info!(
         release_count = releases.len(),
         track_count = releases

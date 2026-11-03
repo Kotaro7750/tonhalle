@@ -1,6 +1,7 @@
 //! Imports independent release candidates without accessing the metadata index.
 
 use std::sync::Arc;
+use tokio::task::{JoinError, spawn_blocking};
 
 use crate::{
     domain::import::{ImportRelease, ImportValidationError},
@@ -13,6 +14,9 @@ use crate::{
 /// A fatal failure preventing complete import-source enumeration.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ImportMusicError {
+    /// The source enumeration worker failed.
+    #[error(transparent)]
+    Worker(#[from] JoinError),
     /// The source could not enumerate all release candidates.
     #[error(transparent)]
     ListReleases(#[from] ListImportReleasesError),
@@ -21,6 +25,9 @@ pub(crate) enum ImportMusicError {
 /// A candidate failure reported while other releases continue importing.
 #[derive(Debug, thiserror::Error)]
 enum ImportCandidateError {
+    /// The source reading and validation worker failed.
+    #[error(transparent)]
+    Worker(#[from] JoinError),
     /// A source audio object could not be obtained.
     #[error(transparent)]
     Read(#[from] ReadImportAudioError),
@@ -59,25 +66,32 @@ impl ImportMusicUseCase {
     }
 
     /// Continues after each candidate failure and reports fatal enumeration failures.
-    pub(crate) fn execute(&self) -> Result<ImportSummary, ImportMusicError> {
-        let candidates = self.source.list_releases()?;
+    pub(crate) async fn execute(&self) -> Result<ImportSummary, ImportMusicError> {
+        let source = self.source.clone();
+        let candidates = spawn_blocking(move || source.list_releases()).await??;
         let mut summary = ImportSummary::default();
         for candidate in candidates {
-            let result = (|| -> Result<SaveReleaseOutcome, ImportCandidateError> {
-                let bytes = candidate
-                    .audio_keys()
-                    .iter()
-                    .map(|key| self.source.read_audio(key))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let release = ImportRelease::new(bytes)?;
-                Ok(self.storage.save_release(&release)?)
-            })();
+            let key = candidate.key().clone();
+            let source = self.source.clone();
+            let result = async {
+                let release = spawn_blocking(move || {
+                    let bytes = candidate
+                        .audio_keys()
+                        .iter()
+                        .map(|key| source.read_audio(key))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok::<_, ImportCandidateError>(ImportRelease::new(bytes)?)
+                })
+                .await??;
+                Ok::<_, ImportCandidateError>(self.storage.save_release(&release).await?)
+            }
+            .await;
             match result {
                 Ok(SaveReleaseOutcome::Saved) => summary.saved += 1,
                 Ok(SaveReleaseOutcome::AlreadyExists) => summary.skipped += 1,
                 Err(error) => {
                     summary.failed += 1;
-                    tracing::warn!(candidate = %candidate.key(), error = %error, "Release import failed");
+                    tracing::warn!(candidate = %key, error = %error, "Release import failed");
                 }
             }
         }
@@ -137,9 +151,10 @@ mod tests {
         saved: Mutex<Vec<Vec<Vec<u8>>>>,
     }
 
+    #[async_trait::async_trait]
     impl MusicStorage for Storage {
         /// Records valid releases and returns the configured outcome.
-        fn save_release(
+        async fn save_release(
             &self,
             release: &ImportRelease,
         ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
@@ -161,15 +176,15 @@ mod tests {
         }
 
         /// Import must never read the destination index.
-        fn scan_releases(
+        async fn scan_releases(
             &self,
         ) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError> {
             panic!("import must not scan storage")
         }
     }
 
-    #[test]
-    fn execute_continues_after_candidate_failures_and_counts_save_outcomes() {
+    #[tokio::test]
+    async fn execute_continues_after_candidate_failures_and_counts_save_outcomes() {
         let bytes = sample_audio(&sample_metadata());
         let source = Arc::new(Source {
             candidates: vec![
@@ -192,6 +207,7 @@ mod tests {
         });
         let result = ImportMusicUseCase::new(source, storage.clone())
             .execute()
+            .await
             .unwrap();
         assert_eq!(
             (result.saved(), result.skipped(), result.failed()),
@@ -201,8 +217,8 @@ mod tests {
         assert!(storage.outcomes.lock().unwrap().is_empty());
     }
 
-    #[test]
-    fn execute_propagates_enumeration_failures_without_saving() {
+    #[tokio::test]
+    async fn execute_propagates_enumeration_failures_without_saving() {
         let source = Arc::new(Source {
             candidates: vec![],
             bytes: vec![],
@@ -213,14 +229,16 @@ mod tests {
             saved: Mutex::new(vec![]),
         });
         assert!(matches!(
-            ImportMusicUseCase::new(source, storage.clone()).execute(),
+            ImportMusicUseCase::new(source, storage.clone())
+                .execute()
+                .await,
             Err(ImportMusicError::ListReleases(_))
         ));
         assert!(storage.saved.lock().unwrap().is_empty());
     }
 
-    #[test]
-    fn execute_returns_an_empty_summary_when_there_are_no_candidates() {
+    #[tokio::test]
+    async fn execute_returns_an_empty_summary_when_there_are_no_candidates() {
         let source = Arc::new(Source {
             candidates: vec![],
             bytes: vec![],
@@ -232,6 +250,7 @@ mod tests {
         });
         let result = ImportMusicUseCase::new(source, storage.clone())
             .execute()
+            .await
             .unwrap();
         assert_eq!(
             (result.saved(), result.skipped(), result.failed()),

@@ -26,7 +26,7 @@ pub(crate) enum ImportValidationError {
 }
 
 /// A validated source audio retaining its exact original bytes.
-#[derive(getset::Getters)]
+#[derive(Clone, getset::Getters)]
 pub(crate) struct ImportAudio {
     track_metadata: TrackMetadata,
     /// Provides the validated format and playback properties.
@@ -38,7 +38,7 @@ pub(crate) struct ImportAudio {
 }
 
 /// A complete release eligible for storage with newly issued audio identities.
-#[derive(getset::Getters)]
+#[derive(Clone, getset::Getters)]
 pub(crate) struct ImportRelease {
     metadata: ReleaseMetadata,
     /// Provides every validated source for release-level persistence.

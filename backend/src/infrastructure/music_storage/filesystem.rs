@@ -6,6 +6,7 @@ use std::{
     io::{Error as IoError, ErrorKind, Write},
     path::{Path, PathBuf, StripPrefixError},
 };
+use tokio::task::spawn_blocking;
 use url::Url;
 use walkdir::WalkDir;
 
@@ -23,6 +24,7 @@ use crate::{
 };
 
 /// A filesystem adapter for reading and saving stored audio releases.
+#[derive(Clone)]
 pub(crate) struct FileSystemMusicStorage {
     root_path: PathBuf,
     playback_url_base: Option<Url>,
@@ -271,9 +273,9 @@ impl FileSystemMusicStorage {
     }
 }
 
-impl MusicStorage for FileSystemMusicStorage {
+impl FileSystemMusicStorage {
     /// Publishes a validated release without replacing existing audio.
-    fn save_release(
+    fn save_release_blocking(
         &self,
         release: &ImportRelease,
     ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
@@ -290,7 +292,9 @@ impl MusicStorage for FileSystemMusicStorage {
     }
 
     /// Groups audio paths by their stored release directory and constructs domain releases.
-    fn scan_releases(&self) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError> {
+    fn scan_releases_blocking(
+        &self,
+    ) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError> {
         let mut groups: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
 
         // Do not follow symlinks outside the configured read-only content root.
@@ -350,6 +354,33 @@ impl MusicStorage for FileSystemMusicStorage {
         );
 
         Ok(results)
+    }
+}
+
+#[async_trait::async_trait]
+impl MusicStorage for FileSystemMusicStorage {
+    async fn save_release(
+        &self,
+        release: &ImportRelease,
+    ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
+        let storage = self.clone();
+        let release = release.clone();
+        let id = release.id().clone();
+        spawn_blocking(move || storage.save_release_blocking(&release))
+            .await
+            .map_err(|source| SaveReleaseError::Internal {
+                id,
+                source: Box::new(source),
+            })?
+    }
+
+    async fn scan_releases(
+        &self,
+    ) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError> {
+        let storage = self.clone();
+        spawn_blocking(move || storage.scan_releases_blocking())
+            .await
+            .map_err(ScanReleasesError::new)?
     }
 }
 
@@ -418,14 +449,14 @@ mod tests {
         path
     }
 
-    #[test]
-    fn save_release_distinguishes_conflicts_and_preserves_io_failure_causes() {
+    #[tokio::test]
+    async fn save_release_distinguishes_conflicts_and_preserves_io_failure_causes() {
         let root = tempfile::tempdir().unwrap();
         let release = ImportRelease::new(vec![sample_audio(&sample_metadata())]).unwrap();
         let storage = FileSystemMusicStorage::for_import(root.path().to_path_buf()).unwrap();
         let destination = root.path().join(release.id().as_ref());
         write(&destination, b"existing object").unwrap();
-        assert!(matches!(storage.save_release(&release),
+        assert!(matches!(storage.save_release(&release).await,
             Err(SaveReleaseError::Conflict { id }) if &id == release.id()));
         assert_eq!(read(destination).unwrap(), b"existing object");
 
@@ -433,7 +464,7 @@ mod tests {
         std::fs::create_dir(&missing).unwrap();
         let storage = FileSystemMusicStorage::for_import(missing.clone()).unwrap();
         std::fs::remove_dir(missing).unwrap();
-        let error = storage.save_release(&release).unwrap_err();
+        let error = storage.save_release(&release).await.unwrap_err();
         assert!(matches!(&error, SaveReleaseError::Internal { id, .. } if id == release.id()));
         let io = error
             .source()
@@ -445,8 +476,8 @@ mod tests {
         assert_eq!(io.kind(), ErrorKind::NotFound);
     }
 
-    #[test]
-    fn scan_releases_preserves_audio_files_and_escapes_delivery_paths() {
+    #[tokio::test]
+    async fn scan_releases_preserves_audio_files_and_escapes_delivery_paths() {
         let temp = tempfile::tempdir().unwrap();
         let nested = temp.path().join("artist with spaces #?%");
         let source = sample_metadata();
@@ -456,6 +487,7 @@ mod tests {
         for _ in 0..2 {
             let release = storage(temp.path())
                 .scan_releases()
+                .await
                 .unwrap()
                 .pop()
                 .unwrap()
@@ -478,8 +510,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn scan_releases_reports_storage_keys_when_release_ids_are_invalid() {
+    #[tokio::test]
+    async fn scan_releases_reports_storage_keys_when_release_ids_are_invalid() {
         let temp = tempfile::tempdir().unwrap();
         let directory = temp.path().join("invalid-release");
 
@@ -487,15 +519,20 @@ mod tests {
 
         write(directory.join("invalid-audio-id.wav"), b"corrupt").unwrap();
 
-        let result = storage(temp.path()).scan_releases().unwrap().pop().unwrap();
+        let result = storage(temp.path())
+            .scan_releases()
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
 
         assert!(
             matches!(result, Err(ReleaseScanFailure::InvalidId { object_key, .. }) if object_key == "invalid-release")
         );
     }
 
-    #[test]
-    fn scan_releases_collects_all_audio_failures_with_their_release_id() {
+    #[tokio::test]
+    async fn scan_releases_collects_all_audio_failures_with_their_release_id() {
         let temp = tempfile::tempdir().unwrap();
         let source = sample_metadata();
         let path = write_audio(temp.path(), &source.clone());
@@ -519,7 +556,7 @@ mod tests {
         .unwrap();
         write_audio_with_id(temp.path(), &different, audio_id);
 
-        let mut results = storage(temp.path()).scan_releases().unwrap();
+        let mut results = storage(temp.path()).scan_releases().await.unwrap();
 
         assert_eq!(results.len(), 2);
         assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
@@ -555,8 +592,8 @@ mod tests {
         assert!(path.exists());
     }
 
-    #[test]
-    fn scan_releases_reports_release_construction_failures() {
+    #[tokio::test]
+    async fn scan_releases_reports_release_construction_failures() {
         let temp = tempfile::tempdir().unwrap();
         let source = sample_metadata();
         write_audio(temp.path(), &source.clone());
@@ -569,6 +606,7 @@ mod tests {
 
         let failure = storage(temp.path())
             .scan_releases()
+            .await
             .unwrap()
             .pop()
             .unwrap()
@@ -589,6 +627,7 @@ mod tests {
 
         let failure = storage(empty.path())
             .scan_releases()
+            .await
             .unwrap()
             .pop()
             .unwrap()
@@ -599,8 +638,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn scan_releases_groups_all_sources_with_the_same_release_id() {
+    #[tokio::test]
+    async fn scan_releases_groups_all_sources_with_the_same_release_id() {
         let temp = tempfile::tempdir().unwrap();
         let source = sample_metadata();
         write_audio(&temp.path().join("a"), &source.clone());
@@ -611,7 +650,7 @@ mod tests {
 
         let second_path = write_audio_with_id(&temp.path().join("b"), &other, audio_id);
 
-        let mut results = storage(temp.path()).scan_releases().unwrap();
+        let mut results = storage(temp.path()).scan_releases().await.unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results.pop().unwrap().unwrap().tracks().len(), 2);
@@ -625,7 +664,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut results = storage(temp.path()).scan_releases().unwrap();
+        let mut results = storage(temp.path()).scan_releases().await.unwrap();
 
         assert_eq!(results.len(), 1);
 
@@ -634,8 +673,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn scan_releases_returns_an_error_when_storage_enumeration_fails() {
+    #[tokio::test]
+    async fn scan_releases_returns_an_error_when_storage_enumeration_fails() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("music");
 
@@ -645,12 +684,12 @@ mod tests {
 
         remove_dir(&root).unwrap();
 
-        assert!(storage.scan_releases().is_err());
+        assert!(storage.scan_releases().await.is_err());
     }
 
     #[cfg(unix)]
-    #[test]
-    fn scan_releases_rejects_symbolic_links_without_following_them() {
+    #[tokio::test]
+    async fn scan_releases_rejects_symbolic_links_without_following_them() {
         use std::os::unix::fs::symlink;
 
         let temp = tempfile::tempdir().unwrap();
@@ -667,6 +706,7 @@ mod tests {
 
         let failure = storage(temp.path())
             .scan_releases()
+            .await
             .unwrap()
             .pop()
             .unwrap()
@@ -679,8 +719,9 @@ mod tests {
             matches!(&failures[0], AudioScanFailure::Read { source, .. } if matches!(source.downcast_ref::<ReadAudioFileError>(), Some(ReadAudioFileError::NotRegularFile)))
         );
     }
-    #[test]
-    fn save_release_preserves_bytes_and_persistent_uuids_without_overwriting_existing_releases() {
+    #[tokio::test]
+    async fn save_release_preserves_bytes_and_persistent_uuids_without_overwriting_existing_releases()
+     {
         let root = tempfile::tempdir().unwrap();
         let storage = FileSystemMusicStorage::for_import(root.path().to_owned()).unwrap();
         let mut second = sample_metadata();
@@ -688,7 +729,7 @@ mod tests {
         let bytes = vec![sample_audio(&sample_metadata()), sample_audio(&second)];
         let release = ImportRelease::new(bytes.clone()).unwrap();
         assert_eq!(
-            storage.save_release(&release).unwrap(),
+            storage.save_release(&release).await.unwrap(),
             SaveReleaseOutcome::Saved
         );
         let directory = root.path().join(release.id().as_ref());
@@ -713,14 +754,14 @@ mod tests {
         }
         let reopened = FileSystemMusicStorage::for_import(root.path().to_owned()).unwrap();
         assert_eq!(
-            reopened.save_release(&release).unwrap(),
+            reopened.save_release(&release).await.unwrap(),
             SaveReleaseOutcome::AlreadyExists
         );
         assert_eq!(snapshot(), original);
     }
 
-    #[test]
-    fn save_release_serializes_concurrent_writes() {
+    #[tokio::test]
+    async fn save_release_serializes_concurrent_writes() {
         let root = tempfile::tempdir().unwrap();
         let storage = std::sync::Arc::new(
             FileSystemMusicStorage::for_import(root.path().to_owned()).unwrap(),
@@ -732,13 +773,13 @@ mod tests {
             .map(|_| {
                 let storage = storage.clone();
                 let release = release.clone();
-                std::thread::spawn(move || storage.save_release(&release).unwrap())
+                tokio::spawn(async move { storage.save_release(&release).await.unwrap() })
             })
             .collect();
-        let results: Vec<_> = workers
-            .into_iter()
-            .map(|worker| worker.join().unwrap())
-            .collect();
+        let mut results = Vec::new();
+        for worker in workers {
+            results.push(worker.await.unwrap());
+        }
         assert_eq!(
             results
                 .iter()
@@ -755,12 +796,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn scan_releases_hides_incomplete_staging() {
+    #[tokio::test]
+    async fn scan_releases_hides_incomplete_staging() {
         let root = tempfile::tempdir().unwrap();
         let partial = root.path().join(STAGING_DIRECTORY).join("interrupted");
         create_dir_all(&partial).unwrap();
         write_audio(&partial, &sample_metadata());
-        assert!(storage(root.path()).scan_releases().unwrap().is_empty());
+        assert!(
+            storage(root.path())
+                .scan_releases()
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 }

@@ -12,13 +12,13 @@ use crate::domain::{
 /// The outcome of a non-overwriting release save.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum SaveReleaseOutcome {
-    /// The complete release was published.
+    /// Every source in the release was saved.
     Saved,
-    /// A previously published release was retained.
+    /// An existing release identity was retained.
     AlreadyExists,
 }
 
-/// A failure to persist a complete release without replacing existing content.
+/// A failure to save a release without replacing existing content.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum SaveReleaseError {
     /// The release identity is occupied by an incompatible destination object.
@@ -90,11 +90,18 @@ pub(crate) enum ReleaseScanFailure {
 }
 
 /// Scans complete domain releases independently of physical storage representation.
+#[async_trait::async_trait]
 pub(crate) trait MusicStorage: Send + Sync {
-    /// Saves a complete release without replacing an existing identity or exposing partial writes.
-    fn save_release(&self, release: &ImportRelease)
-    -> Result<SaveReleaseOutcome, SaveReleaseError>;
+    /// Saves a release, skipping identities already present in storage.
+    ///
+    /// Atomicity depends on the adapter; best-effort storage may expose partial writes on failure.
+    async fn save_release(
+        &self,
+        release: &ImportRelease,
+    ) -> Result<SaveReleaseOutcome, SaveReleaseError>;
 
     /// Returns individual successes and failures separately from incomplete enumeration.
-    fn scan_releases(&self) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError>;
+    async fn scan_releases(
+        &self,
+    ) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError>;
 }

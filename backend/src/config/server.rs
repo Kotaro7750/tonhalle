@@ -5,7 +5,7 @@ use clap::Args;
 use std::net::{IpAddr, SocketAddr};
 use url::{ParseError as UrlParseError, Url};
 
-use crate::config::music_storage::{MusicStorageConfig, MusicStorageConfigError, MusicStorageMode};
+use crate::config::music_storage::{MusicStorageConfig, MusicStorageConfigError};
 
 /// A failure to validate the configured browser origin.
 #[derive(Debug, thiserror::Error)]
@@ -66,20 +66,10 @@ impl ServerConfig {
     pub(crate) fn validate(&self) -> Result<(), ServerConfigError> {
         self.cors_origin()?;
         self.music_storage.validate()?;
-        match self.music_storage.mode() {
-            MusicStorageMode::Filesystem => {
-                let settings = self
-                    .music_storage
-                    .file_system()
-                    .as_ref()
-                    .ok_or(MusicStorageConfigError::MissingSettings)?;
-                settings.playback_url_base().as_ref().ok_or(
-                    ServerCompatibilityError::FileSystem(
-                        FileSystemServerCompatibilityError::MissingPlaybackUrlBase,
-                    ),
-                )?;
-            }
-        }
+        self.music_storage
+            .playback_url_base()
+            .as_ref()
+            .ok_or(ServerCompatibilityError::MissingPlaybackUrlBase)?;
         Ok(())
     }
 
@@ -109,19 +99,11 @@ impl ServerConfig {
     }
 }
 
-/// A failure to use the selected storage implementation for server playback.
+/// A failure to satisfy shared storage requirements for server playback.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ServerCompatibilityError {
-    /// The filesystem storage cannot provide playback with its current settings.
-    #[error(transparent)]
-    FileSystem(#[from] FileSystemServerCompatibilityError),
-}
-
-/// A failure to satisfy filesystem storage requirements for server playback.
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum FileSystemServerCompatibilityError {
     /// Server playback requires a delivery endpoint.
-    #[error("FileSystemMusicStorageConfig.playback_url_base is required for server playback")]
+    #[error("MusicStorageConfig.playback_url_base is required for server playback")]
     MissingPlaybackUrlBase,
 }
 
@@ -129,6 +111,7 @@ pub(crate) enum FileSystemServerCompatibilityError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::music_storage::{MusicStorageMode, sample_config};
 
     #[test]
     fn parse_cors_origin_accepts_single_http_origins() {
@@ -153,6 +136,33 @@ mod tests {
             "null",
         ] {
             assert!(ServerConfig::parse_cors_origin(origin).is_err(), "{origin}");
+        }
+    }
+    #[test]
+    fn server_config_validate_requires_playback_url_for_all_storage_modes() {
+        for mode in [MusicStorageMode::Filesystem, MusicStorageMode::S3] {
+            for url in [None, Some("https://example.com/audio")] {
+                let config = ServerConfig {
+                    listen_address: "127.0.0.1".parse().unwrap(),
+                    listen_port: 3000,
+                    cors_origin: None,
+                    music_storage: sample_config(mode, url.map(|url| url.parse().unwrap())),
+                };
+                let result = config.validate();
+                if url.is_none() {
+                    assert!(
+                        matches!(
+                            result,
+                            Err(ServerConfigError::Compatibility(
+                                ServerCompatibilityError::MissingPlaybackUrlBase
+                            ))
+                        ),
+                        "{mode:?}"
+                    );
+                } else {
+                    assert!(result.is_ok(), "{mode:?}");
+                }
+            }
         }
     }
 }

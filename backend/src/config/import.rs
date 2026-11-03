@@ -34,6 +34,7 @@ impl ImportConfig {
         self.storage.validate()?;
 
         match (self.source.mode(), self.storage.mode()) {
+            (ImportSourceMode::Filesystem, MusicStorageMode::S3) => {}
             (ImportSourceMode::Filesystem, MusicStorageMode::Filesystem) => {
                 let source = self
                     .source
