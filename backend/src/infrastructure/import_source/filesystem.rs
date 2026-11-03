@@ -25,17 +25,6 @@ pub(crate) enum FileSystemImportSourceConstructionError {
     NotDirectory,
 }
 
-/// A failure to validate filesystem source and destination compatibility.
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum FileSystemImportCompatibilityError {
-    /// One configured root cannot be resolved.
-    #[error("resolving import storage roots: {0}")]
-    ResolveRoot(#[from] IoError),
-    /// Source and destination must not share a directory tree.
-    #[error("import source and content storage directories must not overlap")]
-    OverlappingRoots,
-}
-
 /// A physical enumeration failure before all release candidates are known.
 #[derive(Debug, thiserror::Error)]
 enum FileSystemImportEnumerationError {
@@ -48,40 +37,6 @@ enum FileSystemImportEnumerationError {
     /// An enumerated locator cannot be represented as text.
     #[error("non-UTF-8 import path")]
     NonUtf8Path,
-}
-
-/// CLI settings and construction rules for the filesystem import source.
-#[derive(Debug, clap::Args)]
-pub(crate) struct FileSystemImportSourceConfig {
-    /// Directory tree containing release candidates.
-    #[arg(
-        id = "import_source_root_path",
-        long = "import-source--root-path",
-        env = "TONHALLE_IMPORT_SOURCE__ROOT_PATH"
-    )]
-    root_path: PathBuf,
-}
-
-impl FileSystemImportSourceConfig {
-    /// Constructs the concrete adapter using its own path validation.
-    pub(crate) fn construct_import_source(
-        &self,
-    ) -> Result<FileSystemImportSource, FileSystemImportSourceConstructionError> {
-        FileSystemImportSource::new(self.root_path.clone())
-    }
-
-    /// Rejects filesystem roots that would allow imports to read or modify their own source tree.
-    pub(crate) fn validate_destination(
-        &self,
-        destination: &Path,
-    ) -> Result<(), FileSystemImportCompatibilityError> {
-        let source = self.root_path.canonicalize()?;
-        let destination = destination.canonicalize()?;
-        if source.starts_with(&destination) || destination.starts_with(&source) {
-            return Err(FileSystemImportCompatibilityError::OverlappingRoots);
-        }
-        Ok(())
-    }
 }
 
 /// A read-only directory tree containing release directories.
@@ -241,5 +196,38 @@ mod tests {
             Some(FileSystemImportEnumerationError::Traverse(_))
         ));
         assert!(cause.source().is_some());
+    }
+    #[test]
+    fn list_releases_groups_direct_audio_children_and_read_audio_preserves_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        for (path, bytes) in [
+            ("artist/album/one.WAV", b"first".as_slice()),
+            ("artist/album/two.flac", b"second".as_slice()),
+            ("artist/album/disc/tone.mp3", b"nested".as_slice()),
+            ("artist/album/notes.txt", b"ignored".as_slice()),
+        ] {
+            let path = root.path().join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
+        let source = FileSystemImportSource::new(root.path().to_owned()).unwrap();
+        let candidates = source.list_releases().unwrap();
+        let groups: Vec<_> = candidates
+            .iter()
+            .map(|candidate| candidate.audio_keys().clone())
+            .collect();
+        assert_eq!(
+            groups,
+            vec![
+                vec!["artist/album/one.WAV", "artist/album/two.flac"],
+                vec!["artist/album/disc/tone.mp3"]
+            ]
+        );
+        assert_eq!(source.read_audio(&groups[0][0]).unwrap(), b"first");
+        assert_eq!(source.read_audio(&groups[1][0]).unwrap(), b"nested");
+        assert_eq!(
+            std::fs::read(root.path().join("artist/album/one.WAV")).unwrap(),
+            b"first"
+        );
     }
 }

@@ -13,65 +13,84 @@ use std::io::{Cursor, Error as IoError};
 use crate::domain::primitive::audio_file::MediaType;
 
 /// Embedded tags and audio properties awaiting domain validation.
+#[cfg_attr(test, derive(getset::MutGetters))]
 #[derive(getset::Getters, Debug, Clone)]
 pub(crate) struct RawMetadata {
     /// Preserves source spelling before release identity normalization.
     #[getset(get = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     release_title: String,
     /// Preserves date precision for release validation.
     #[getset(get = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     release_date: String,
     /// Provides the unvalidated release artist names and MBIDs.
     #[getset(get = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     release_credit: RawCreditMetadata,
     /// Preserves source spelling before track identity normalization.
     #[getset(get = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     track_title: String,
     /// Provides the unvalidated track artist names and MBIDs.
     #[getset(get = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     track_credit: RawCreditMetadata,
     /// Preserves raw disc notation for positive-number validation.
     #[getset(get = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     disc_number: String,
     /// Preserves raw track notation for positive-number validation.
     #[getset(get = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     track_number: String,
     /// Provides the extracted technical information before entity construction.
     #[getset(get = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     audio: RawAudioMetadata,
 }
 
 /// Artist name and MBID lists whose correspondence has not yet been validated.
+#[cfg_attr(test, derive(getset::MutGetters))]
 #[derive(getset::Getters, Debug, Clone)]
 pub(crate) struct RawCreditMetadata {
     /// Preserves explicit artist name boundaries and source spelling.
     #[getset(get = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     names: Vec<String>,
     /// Preserves raw MBID order for later name correspondence.
     #[getset(get = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     mbids: Vec<String>,
 }
 
 /// Audio properties and container identity awaiting domain validation.
+#[cfg_attr(test, derive(getset::MutGetters))]
 #[derive(getset::CopyGetters, Debug, Clone)]
 pub(crate) struct RawAudioMetadata {
     /// Provides the measured playback duration before track construction.
     #[getset(get_copy = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     duration_ms: Option<u128>,
     /// Provides the sampling frequency in hertz reported by the audio format.
     #[getset(get_copy = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     sample_rate: u32,
     /// Provides the number of bits used for each audio sample when available.
     #[getset(get_copy = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     bit_depth: Option<u32>,
     /// Provides the content type detected from audio bytes.
     #[getset(get_copy = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     media_type: MediaType,
     /// Provides the channel count reported by the audio format.
     #[getset(get_copy = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     channels: u32,
     /// Provides the audio bitrate in bits per second when available.
     #[getset(get_copy = "pub(crate)")]
+    #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
     bitrate: Option<u64>,
 }
 
@@ -183,59 +202,58 @@ fn first(file: &TaggedFile, key: ItemKey) -> Option<String> {
     values(file, key).into_iter().next()
 }
 
+/// Creates unvalidated input data without a duplicate test model.
+#[cfg(test)]
+pub(crate) fn sample_metadata() -> RawMetadata {
+    RawMetadata {
+        release_title: "Example Release".into(),
+        release_date: "2026-10-13".into(),
+        release_credit: RawCreditMetadata {
+            names: vec!["Example Artist".into()],
+            mbids: vec![],
+        },
+        track_title: "Example Track".into(),
+        track_credit: RawCreditMetadata {
+            names: vec!["Example Artist".into()],
+            mbids: vec![],
+        },
+        disc_number: "1".into(),
+        track_number: "1".into(),
+        audio: RawAudioMetadata {
+            duration_ms: Some(1000),
+            sample_rate: 44100,
+            bit_depth: Some(16),
+            media_type: MediaType::Wav,
+            channels: 2,
+            bitrate: Some(1411200),
+        },
+    }
+}
+
 /// Verifies extraction preserves source values before domain validation.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{MetadataFixture, sample_audio, sample_metadata};
-
-    impl From<&MetadataFixture> for RawMetadata {
-        /// Builds raw metadata directly from editable test values.
-        fn from(fixture: &MetadataFixture) -> Self {
-            Self {
-                release_title: fixture.release_title().clone(),
-                release_date: fixture.release_date().clone(),
-                release_credit: RawCreditMetadata {
-                    names: fixture.release_artists().names().clone(),
-                    mbids: fixture.release_artists().mbids().clone(),
-                },
-                track_title: fixture.track_title().clone(),
-                track_credit: RawCreditMetadata {
-                    names: fixture.track_artists().names().clone(),
-                    mbids: fixture.track_artists().mbids().clone(),
-                },
-                disc_number: fixture.disc_number().clone(),
-                track_number: fixture.track_number().clone(),
-                audio: RawAudioMetadata {
-                    duration_ms: fixture.duration_ms(),
-                    sample_rate: fixture.audio_file().sample_rate(),
-                    bit_depth: fixture.audio_file().bit_depth(),
-                    media_type: fixture.audio_file().media_type(),
-                    channels: fixture.audio_file().channels(),
-                    bitrate: fixture.audio_file().bitrate(),
-                },
-            }
-        }
-    }
+    use crate::test_support::sample_audio;
 
     #[test]
     fn extract_metadata_preserves_missing_and_invalid_metadata_without_validation() {
         let source = sample_metadata();
-        let mut invalid = MetadataFixture::from(&source);
+        let mut invalid = source.clone();
         invalid.release_title_mut().clear();
         *invalid.release_date_mut() = "2026-02-29".into();
-        invalid.release_artists_mut().names_mut().clear();
-        *invalid.release_artists_mut().mbids_mut() =
+        invalid.release_credit_mut().names_mut().clear();
+        *invalid.release_credit_mut().mbids_mut() =
             vec!["7b0857ed-11ee-4426-9899-16f4e415322f".into()];
         *invalid.track_title_mut() = " \t".into();
-        *invalid.track_artists_mut().names_mut() = vec![" One ".into(), "Two".into()];
-        *invalid.track_artists_mut().mbids_mut() = vec![
+        *invalid.track_credit_mut().names_mut() = vec![" One ".into(), "Two".into()];
+        *invalid.track_credit_mut().mbids_mut() = vec![
             "f7b87070-d876-4a11-997a-048cdff1a87d".into(),
             "7b0857ed-11ee-4426-9899-16f4e415322f".into(),
         ];
         *invalid.disc_number_mut() = "0".into();
 
-        let audio = sample_audio(&invalid.build());
+        let audio = sample_audio(&invalid);
         let extracted = extract_metadata(&audio).unwrap();
 
         assert!(extracted.release_title().is_empty());
@@ -243,16 +261,16 @@ mod tests {
         assert!(extracted.release_credit().names().is_empty());
         assert_eq!(
             extracted.release_credit().mbids(),
-            invalid.release_artists().mbids()
+            invalid.release_credit().mbids()
         );
         assert_eq!(extracted.track_title(), " \t");
         assert_eq!(
             extracted.track_credit().names(),
-            invalid.track_artists().names()
+            invalid.track_credit().names()
         );
         assert_eq!(
             extracted.track_credit().mbids(),
-            invalid.track_artists().mbids()
+            invalid.track_credit().mbids()
         );
         assert_eq!(extracted.disc_number(), "0");
     }
@@ -262,10 +280,10 @@ mod tests {
         let source = sample_metadata();
 
         for (stored_bitrate, expected_bitrate) in [(1_411_200, 1_411_200), (2_116_800, 2_117_000)] {
-            let mut fixture = MetadataFixture::from(&source);
-            *fixture.audio_file_mut().bitrate_mut() = Some(stored_bitrate);
+            let mut fixture = source.clone();
+            *fixture.audio_mut().bitrate_mut() = Some(stored_bitrate);
 
-            let extracted = extract_metadata(&sample_audio(&fixture.build())).unwrap();
+            let extracted = extract_metadata(&sample_audio(&fixture)).unwrap();
 
             assert_eq!(
                 extracted.audio().sample_rate(),
@@ -274,6 +292,124 @@ mod tests {
             assert_eq!(extracted.audio().bit_depth(), source.audio().bit_depth());
             assert_eq!(extracted.audio().channels(), source.audio().channels());
             assert_eq!(extracted.audio().bitrate(), Some(expected_bitrate));
+        }
+    }
+    #[test]
+    fn extract_metadata_reads_supported_formats_and_optional_properties() {
+        use lofty::{
+            config::WriteOptions,
+            file::FileType,
+            tag::{ItemKey, ItemValue, Tag, TagExt, TagItem},
+        };
+        use std::fs::{read, write};
+
+        let fixture = sample_metadata();
+        for (extension, bytes, media_type, bit_depth) in [
+            (
+                "flac",
+                include_bytes!("../../../../test_fixtures/tone.flac").as_slice(),
+                "audio/flac",
+                Some(16),
+            ),
+            (
+                "aac",
+                include_bytes!("../../../../test_fixtures/tone.aac").as_slice(),
+                "audio/aac",
+                None,
+            ),
+            (
+                "m4a",
+                include_bytes!("../../../../test_fixtures/tone.m4a").as_slice(),
+                "audio/mp4",
+                None,
+            ),
+            (
+                "ogg",
+                include_bytes!("../../../../test_fixtures/tone.ogg").as_slice(),
+                "audio/ogg",
+                None,
+            ),
+            (
+                "opus",
+                include_bytes!("../../../../test_fixtures/tone.opus").as_slice(),
+                "audio/ogg",
+                None,
+            ),
+            (
+                "spx",
+                include_bytes!("../../../../test_fixtures/tone.spx").as_slice(),
+                "audio/ogg",
+                None,
+            ),
+            (
+                "mp3",
+                include_bytes!("../../../../test_fixtures/tone.mp3").as_slice(),
+                "audio/mpeg",
+                None,
+            ),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let directory = root.path();
+            let path = directory.join(format!("{}.{}", "tone", extension.to_uppercase()));
+            write(&path, bytes).unwrap();
+            let mut tag = Tag::new(FileType::from_ext(extension).unwrap().primary_tag_type());
+            for (key, value) in [
+                (ItemKey::AlbumTitle, fixture.release_title().as_str()),
+                (ItemKey::ReleaseDate, fixture.release_date().as_str()),
+                (ItemKey::AlbumArtist, "Example Artist"),
+                (ItemKey::TrackTitle, fixture.track_title().as_str()),
+                (ItemKey::DiscNumber, "1"),
+                (ItemKey::TrackNumber, "1"),
+            ] {
+                tag.insert_text(key, value.to_owned());
+            }
+            for name in ["First Artist", "Second Artist"] {
+                tag.push(TagItem::new(
+                    ItemKey::TrackArtist,
+                    ItemValue::Text(name.into()),
+                ));
+            }
+            tag.save_to_path(&path, WriteOptions::new()).unwrap();
+
+            let extracted = extract_metadata(&read(&path).unwrap()).unwrap();
+            assert_eq!(
+                extracted.track_title(),
+                fixture.track_title(),
+                "{extension}"
+            );
+            assert_eq!(
+                extracted.track_credit().names(),
+                &["First Artist", "Second Artist"]
+            );
+            assert_eq!(
+                extracted.audio().media_type().as_str(),
+                media_type,
+                "{extension}"
+            );
+            assert_eq!(extracted.audio().bit_depth(), bit_depth, "{extension}");
+            assert_eq!(
+                extracted.audio().sample_rate(),
+                if extension == "opus" { 24000 } else { 32000 }
+            );
+            assert_eq!(extracted.audio().channels(), 1);
+            assert!(extracted.audio().bitrate().unwrap() > 0);
+            assert!(
+                extracted.audio().duration_ms().unwrap() >= 900,
+                "{extension}"
+            );
+
+            if extension == "flac" {
+                // FLAC permits an unknown total sample count in STREAMINFO.
+                let mut bytes = read(&path).unwrap();
+                assert_eq!(&bytes[..4], b"fLaC");
+                assert_eq!(bytes[4] & 0x7f, 0);
+                bytes[21] &= 0xf0;
+                bytes[22..26].fill(0);
+                write(&path, bytes).unwrap();
+                let unknown = extract_metadata(&read(&path).unwrap()).unwrap();
+                assert_eq!(unknown.audio().duration_ms(), None);
+                assert_eq!(unknown.audio().bitrate(), None);
+            }
         }
     }
 }

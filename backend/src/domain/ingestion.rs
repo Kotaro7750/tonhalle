@@ -119,7 +119,23 @@ pub(crate) fn build_release(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{MetadataFixture, release_metadata, sample_metadata};
+    use crate::domain::ingestion::metadata::{RawMetadata, sample_metadata};
+    use crate::test_support::{release_metadata, sample_audio, sample_audio_file};
+
+    /// Supplies stable storage information to ingestion tests.
+    fn ingest_sample(
+        raw: &RawMetadata,
+        release_id: &ReleaseId,
+    ) -> Result<(Track, ReleaseMetadata), IngestTrackError> {
+        let audio = sample_audio_file();
+        ingest_track(
+            &sample_audio(raw),
+            audio.id(),
+            audio.object_key().into(),
+            audio.playback_url().clone(),
+            release_id,
+        )
+    }
 
     #[test]
     fn ingest_track_rejects_missing_required_values_without_defaults() {
@@ -128,18 +144,18 @@ mod tests {
 
         let mut variants = Vec::new();
         for field in 0..9 {
-            let mut invalid = MetadataFixture::from(&source);
+            let mut invalid = source.clone();
 
             match field {
                 0 => invalid.release_title_mut().clear(),
                 1 => *invalid.release_date_mut() = "2026-02-29".into(),
-                2 => invalid.release_artists_mut().names_mut().clear(),
+                2 => invalid.release_credit_mut().names_mut().clear(),
                 3 => *invalid.track_title_mut() = "\t\n".into(),
-                4 => invalid.track_artists_mut().names_mut().clear(),
+                4 => invalid.track_credit_mut().names_mut().clear(),
                 5 => *invalid.track_number_mut() = "0".into(),
-                6 => *invalid.audio_file_mut().sample_rate_mut() = 0,
-                7 => *invalid.audio_file_mut().bit_depth_mut() = Some(0),
-                8 => *invalid.audio_file_mut().channels_mut() = 0,
+                6 => *invalid.audio_mut().sample_rate_mut() = 0,
+                7 => *invalid.audio_mut().bit_depth_mut() = Some(0),
+                8 => *invalid.audio_mut().channels_mut() = 0,
                 _ => unreachable!(),
             }
 
@@ -147,7 +163,7 @@ mod tests {
         }
 
         for invalid in variants {
-            assert!(invalid.ingest_track(&release_id).is_err());
+            assert!(ingest_sample(&invalid, &release_id).is_err());
         }
     }
 
@@ -157,12 +173,12 @@ mod tests {
 
         let source = sample_metadata();
         let release_id = release_metadata(&source).unwrap().id().clone();
-        let storage = MetadataFixture::from(&source).audio_file().clone();
+        let storage = sample_audio_file();
         let parse = |bytes: &[u8]| {
             ingest_track(
                 bytes,
                 storage.id(),
-                storage.object_key().clone(),
+                storage.object_key().into(),
                 storage.playback_url().clone(),
                 &release_id,
             )
@@ -179,11 +195,11 @@ mod tests {
         assert_eq!(plain.0.id(), tagged.0.id());
         assert_eq!(plain.1, tagged.1);
 
-        let mut changed = MetadataFixture::from(&source);
+        let mut changed = source.clone();
         changed.track_title_mut().push_str(" Revised");
 
         let changed_track = parse(&sample_audio_with_mbids(
-            &changed.build(),
+            &changed,
             Some("7b0857ed-11ee-4426-9899-16f4e415322f"),
             Some("f7b87070-d876-4a11-997a-048cdff1a87d"),
         ))
@@ -192,11 +208,11 @@ mod tests {
         assert_ne!(plain.0.id(), changed_track.0.id());
 
         changed.release_title_mut().push_str(" Revised");
-        let actual = release_metadata(&changed.build()).unwrap().id().clone();
+        let actual = release_metadata(&changed).unwrap().id().clone();
 
         assert!(matches!(
             parse(&sample_audio_with_mbids(
-                &changed.build(),
+                &changed,
                 Some("7b0857ed-11ee-4426-9899-16f4e415322f"),
                 Some("f7b87070-d876-4a11-997a-048cdff1a87d"),
             )),
@@ -208,21 +224,16 @@ mod tests {
     fn ingest_track_preserves_audio_identity_when_release_metadata_changes() {
         let source = sample_metadata();
         let first = release_metadata(&source).unwrap();
-        let (original, _) = MetadataFixture::from(&source)
-            .ingest_track(first.id())
-            .unwrap();
+        let (original, _) = ingest_sample(&source, first.id()).unwrap();
 
-        let mut changed = MetadataFixture::from(&source);
+        let mut changed = source.clone();
 
         changed.release_title_mut().push_str(" Revised");
 
-        let second = release_metadata(&changed.build()).unwrap();
-        let (updated, _) = changed.ingest_track(second.id()).unwrap();
+        let second = release_metadata(&changed).unwrap();
+        let (updated, _) = ingest_sample(&changed, second.id()).unwrap();
 
         assert_ne!(original.id(), updated.id());
-        assert_eq!(
-            updated.original_audio_file().id(),
-            changed.audio_file().id()
-        );
+        assert_eq!(updated.original_audio_file().id(), sample_audio_file().id());
     }
 }

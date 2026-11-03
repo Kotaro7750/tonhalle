@@ -121,7 +121,7 @@ impl AudioFile {
         self.id
     }
 
-    /// Locates the original audio in content storage.
+    /// Locates the original audio in music storage.
     pub(crate) fn object_key(&self) -> &str {
         &self.object_key
     }
@@ -185,34 +185,50 @@ impl AudioProperties {
     }
 }
 
-/// Verifies required properties and the bitrate range at audio-file construction.
+/// Verifies playback-property constraints directly at construction.
 #[cfg(test)]
 mod tests {
-    use super::{AudioFileValidationError, MediaType};
-    use crate::test_support::sample_fixture;
+    use super::*;
 
     #[test]
-    fn audio_file_new_rejects_missing_properties_and_bitrate_overflow() {
-        for field in 0..5 {
-            let mut invalid = sample_fixture().audio_file().clone();
-
-            match field {
-                0 => *invalid.sample_rate_mut() = 0,
-                1 => *invalid.bit_depth_mut() = Some(0),
-                2 => *invalid.channels_mut() = 0,
-                3 => *invalid.bitrate_mut() = Some(0),
-                4 => *invalid.bitrate_mut() = Some(u64::from(u32::MAX) + 1),
-                _ => unreachable!(),
-            }
-
-            let error = invalid.build().unwrap_err();
-
-            match field {
-                4 => assert!(matches!(error, AudioFileValidationError::BitrateOverflow)),
-                _ => assert!(matches!(error, AudioFileValidationError::MissingProperties)),
-            }
+    fn audio_properties_new_rejects_missing_properties_and_bitrate_overflow() {
+        for (rate, depth, channels, bitrate) in [
+            (0, Some(16), 2, Some(1411200)),
+            (44100, Some(0), 2, Some(1411200)),
+            (44100, Some(16), 0, Some(1411200)),
+            (44100, Some(16), 2, Some(0)),
+        ] {
+            assert!(matches!(
+                AudioProperties::new(MediaType::Wav, rate, depth, channels, bitrate),
+                Err(AudioFileValidationError::MissingProperties)
+            ));
         }
+        assert!(matches!(
+            AudioProperties::new(
+                MediaType::Wav,
+                44100,
+                Some(16),
+                2,
+                Some(u64::from(u32::MAX) + 1)
+            ),
+            Err(AudioFileValidationError::BitrateOverflow)
+        ));
+        assert_eq!(
+            AudioProperties::new(
+                MediaType::Wav,
+                44100,
+                Some(16),
+                2,
+                Some(u64::from(u32::MAX))
+            )
+            .unwrap()
+            .bitrate(),
+            Some(u32::MAX)
+        );
+    }
 
+    #[test]
+    fn audio_properties_new_preserves_optional_properties() {
         for media_type in [
             MediaType::Wav,
             MediaType::Flac,
@@ -221,24 +237,23 @@ mod tests {
             MediaType::Mp4,
             MediaType::Ogg,
         ] {
-            let mut missing_precision = sample_fixture().audio_file().clone();
-            *missing_precision.media_type_mut() = media_type;
-            *missing_precision.bit_depth_mut() = None;
-            *missing_precision.bitrate_mut() = None;
-            let audio = missing_precision.build().unwrap();
-            assert!(audio.bit_depth().is_none());
-            assert!(audio.bitrate().is_none());
-            assert_eq!(audio.id(), missing_precision.id());
+            let properties = AudioProperties::new(media_type, 44100, None, 2, None).unwrap();
+            assert_eq!(properties.media_type(), media_type);
+            assert_eq!(properties.bit_depth(), None);
+            assert_eq!(properties.bitrate(), None);
         }
+    }
 
-        let mut valid = sample_fixture().audio_file().clone();
-        *valid.bitrate_mut() = Some(u64::from(u32::MAX));
-
-        let audio = valid.build().unwrap();
-
-        assert_eq!(audio.bitrate(), Some(u32::MAX));
-        assert_eq!(audio.id(), valid.id());
-        assert_eq!(audio.object_key(), valid.object_key());
-        assert_eq!(audio.playback_url(), valid.playback_url());
+    #[test]
+    fn audio_file_from_properties_preserves_storage_information() {
+        let id = "2f1c75fc-55de-4d4b-8992-76050f65dff0".parse().unwrap();
+        let url: Url = "https://example.com/audio.wav".parse().unwrap();
+        let properties =
+            AudioProperties::new(MediaType::Wav, 44100, Some(16), 2, Some(1411200)).unwrap();
+        let audio = AudioFile::from_properties(id, "audio.wav".into(), url.clone(), properties);
+        assert_eq!(audio.id(), id);
+        assert_eq!(audio.object_key(), "audio.wav");
+        assert_eq!(audio.playback_url(), &url);
+        assert_eq!(audio.bitrate(), Some(1411200));
     }
 }

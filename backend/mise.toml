@@ -6,8 +6,8 @@ dir = "."
 run = "cargo run --locked -- server"
 
 [tasks.dev.env]
-TONHALLE_CONTENT_STORAGE__ROOT_PATH = "../sample"
-TONHALLE_CONTENT_STORAGE__PLAYBACK_URL_BASE = "http://localhost:8000/"
+TONHALLE_MUSIC_STORAGE__ROOT_PATH = "../sample"
+TONHALLE_MUSIC_STORAGE__PLAYBACK_URL_BASE = "http://localhost:8000/"
 
 [tasks.test]
 dir = "."

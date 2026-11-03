@@ -3,19 +3,16 @@
 use axum::http::{HeaderValue, header::InvalidHeaderValue};
 use clap::Args;
 use std::net::{IpAddr, SocketAddr};
-use url::Url;
+use url::{ParseError as UrlParseError, Url};
 
-use crate::{
-    config::content_storage::ContentStorageConfig,
-    infrastructure::music_storage::filesystem::FileSystemStorageConstructionError,
-};
+use crate::config::music_storage::{MusicStorageConfig, MusicStorageConfigError, MusicStorageMode};
 
 /// A failure to validate the configured browser origin.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CorsOriginError {
     /// The configured value cannot be interpreted as a URL.
     #[error("invalid CORS origin URL: {0}")]
-    UrlParse(#[from] url::ParseError),
+    UrlParse(#[from] UrlParseError),
     /// The URL cannot represent one HTTP(S) browser origin.
     #[error("CORS origin must be a single HTTP(S) origin")]
     InvalidOrigin,
@@ -47,7 +44,7 @@ pub(crate) struct ServerConfig {
     /// Audio storage and playback delivery settings.
     #[command(flatten)]
     #[getset(get = "pub(crate)")]
-    content_storage: ContentStorageConfig,
+    music_storage: MusicStorageConfig,
 }
 
 /// A failure to validate settings needed by the HTTP server.
@@ -58,14 +55,31 @@ pub(crate) enum ServerConfigError {
     Cors(#[from] CorsOriginError),
     /// The storage delivery configuration is missing or invalid.
     #[error(transparent)]
-    Storage(#[from] FileSystemStorageConstructionError),
+    Storage(#[from] MusicStorageConfigError),
+    /// The selected storage cannot provide server playback.
+    #[error(transparent)]
+    Compatibility(#[from] ServerCompatibilityError),
 }
 
 impl ServerConfig {
     /// Validates command-specific requirements before initializing server resources.
     pub(crate) fn validate(&self) -> Result<(), ServerConfigError> {
         self.cors_origin()?;
-        self.content_storage.validate_playback_url()?;
+        self.music_storage.validate()?;
+        match self.music_storage.mode() {
+            MusicStorageMode::Filesystem => {
+                let settings = self
+                    .music_storage
+                    .file_system()
+                    .as_ref()
+                    .ok_or(MusicStorageConfigError::MissingSettings)?;
+                settings.playback_url_base().as_ref().ok_or(
+                    ServerCompatibilityError::FileSystem(
+                        FileSystemServerCompatibilityError::MissingPlaybackUrlBase,
+                    ),
+                )?;
+            }
+        }
         Ok(())
     }
 
@@ -77,100 +91,57 @@ impl ServerConfig {
     /// Validates an optional HTTP(S) origin for cross-origin API requests.
     pub(crate) fn cors_origin(&self) -> Result<Option<HeaderValue>, CorsOriginError> {
         self.cors_origin
-            .as_ref()
-            .map(|value| {
-                let url = Url::parse(value)?;
-
-                if !matches!(url.scheme(), "http" | "https")
-                    || url.host_str().is_none()
-                    || url.origin().ascii_serialization() != *value
-                {
-                    return Err(CorsOriginError::InvalidOrigin);
-                }
-
-                Ok(value.parse()?)
-            })
+            .as_deref()
+            .map(Self::parse_cors_origin)
             .transpose()
     }
+
+    /// Converts a single HTTP(S) browser origin into a response header value.
+    fn parse_cors_origin(value: &str) -> Result<HeaderValue, CorsOriginError> {
+        let url = Url::parse(value)?;
+        if !matches!(url.scheme(), "http" | "https")
+            || url.host_str().is_none()
+            || url.origin().ascii_serialization() != value
+        {
+            return Err(CorsOriginError::InvalidOrigin);
+        }
+        Ok(value.parse()?)
+    }
+}
+
+/// A failure to use the selected storage implementation for server playback.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ServerCompatibilityError {
+    /// The filesystem storage cannot provide playback with its current settings.
+    #[error(transparent)]
+    FileSystem(#[from] FileSystemServerCompatibilityError),
+}
+
+/// A failure to satisfy filesystem storage requirements for server playback.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum FileSystemServerCompatibilityError {
+    /// Server playback requires a delivery endpoint.
+    #[error("FileSystemMusicStorageConfig.playback_url_base is required for server playback")]
+    MissingPlaybackUrlBase,
 }
 
 /// Verifies the application-specific browser-origin constraints.
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
-
     use super::*;
-    use crate::infrastructure::music_storage::filesystem::FileSystemStorageConstructionError;
-
-    /// Constructs server settings with a valid playback endpoint.
-    fn config(origin: Option<&str>) -> ServerConfig {
-        config_with_playback_url(origin, Some("http://localhost:8000/"))
-    }
-
-    /// Parses adapter settings without accessing their private fields.
-    fn config_with_playback_url(origin: Option<&str>, url: Option<&str>) -> ServerConfig {
-        ServerConfig {
-            listen_address: IpAddr::from([127, 0, 0, 1]),
-            listen_port: 3000,
-            cors_origin: origin.map(str::to_owned),
-            content_storage: {
-                /// Parses shared storage arguments for configuration tests.
-                #[derive(Parser)]
-                struct Settings {
-                    /// Holds the adapter settings under validation.
-                    #[command(flatten)]
-                    storage: ContentStorageConfig,
-                }
-                let mut args = vec!["test", "--content-storage--root-path", "../sample"];
-                if let Some(url) = url {
-                    args.extend(["--content-storage--playback-url-base", url]);
-                }
-                Settings::try_parse_from(args).unwrap().storage
-            },
-        }
-    }
 
     #[test]
-    fn server_config_validate_requires_a_valid_storage_playback_url() {
-        let settings = config(None);
-        assert!(settings.validate().is_ok());
-
-        let settings = config_with_playback_url(None, None);
-        assert!(matches!(
-            settings.validate(),
-            Err(ServerConfigError::Storage(
-                FileSystemStorageConstructionError::MissingPlaybackUrlBase
-            ))
-        ));
-
-        for url in [
-            "ftp://example.com/",
-            "https://example.com/?token=value",
-            "https://example.com/#fragment",
-        ] {
-            let settings = config_with_playback_url(None, Some(url));
-            assert!(matches!(
-                settings.validate(),
-                Err(ServerConfigError::Storage(
-                    FileSystemStorageConstructionError::InvalidPlaybackUrlBase
-                ))
-            ));
-        }
-    }
-
-    #[test]
-    fn cors_origin_accepts_absent_or_single_http_origins() {
-        assert_eq!(config(None).cors_origin().unwrap(), None);
+    fn parse_cors_origin_accepts_single_http_origins() {
         for origin in ["http://localhost:5173", "https://example.com"] {
             assert_eq!(
-                config(Some(origin)).cors_origin().unwrap(),
-                Some(HeaderValue::from_str(origin).unwrap())
+                ServerConfig::parse_cors_origin(origin).unwrap(),
+                HeaderValue::from_str(origin).unwrap()
             );
         }
     }
 
     #[test]
-    fn cors_origin_rejects_values_that_are_not_single_http_origins() {
+    fn parse_cors_origin_rejects_values_that_are_not_single_http_origins() {
         for origin in [
             "*",
             "https://example.com/path",
@@ -181,7 +152,7 @@ mod tests {
             "ftp://example.com",
             "null",
         ] {
-            assert!(config(Some(origin)).cors_origin().is_err(), "{origin}");
+            assert!(ServerConfig::parse_cors_origin(origin).is_err(), "{origin}");
         }
     }
 }

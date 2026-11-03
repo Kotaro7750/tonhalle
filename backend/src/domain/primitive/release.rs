@@ -243,30 +243,57 @@ fn validate_release_date(value: &str) -> Result<(), ReleaseMetadataValidationErr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{MetadataFixture, sample_fixture, sample_metadata, sample_release};
+    use crate::{
+        domain::{
+            ingestion::metadata::sample_metadata,
+            primitive::audio_file::{AudioFile, AudioProperties, MediaType},
+        },
+        test_support::{release_metadata, sample_audio_file, sample_release, sample_track},
+    };
 
     #[test]
     fn release_new_keeps_the_first_original_and_orders_tracks_for_display() {
-        let source = sample_fixture();
-        let id = source.build_release_metadata().unwrap().id().clone();
+        let source = sample_metadata();
+        let id = release_metadata(&source).unwrap().id().clone();
 
-        let mut second = sample_fixture();
+        let mut second = sample_metadata();
         *second.track_number_mut() = "2".into();
-        *second.audio_file_mut().id_mut() = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
+        let audio_id = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
 
-        let first_original = second.build_track(&id).unwrap();
+        let audio = sample_audio_file();
+        let first_original = sample_track(
+            &second,
+            &id,
+            AudioFile::from_properties(
+                audio_id,
+                audio.object_key().into(),
+                audio.playback_url().clone(),
+                AudioProperties::new(MediaType::Wav, 44100, Some(16), 2, Some(1411200)).unwrap(),
+            ),
+        );
 
-        *second.audio_file_mut().id_mut() = "925eda40-54cb-4af4-9579-6811fc7477ac".parse().unwrap();
-        let duplicate = second.build_track(&id).unwrap();
+        let audio_id = "925eda40-54cb-4af4-9579-6811fc7477ac".parse().unwrap();
+        let duplicate = sample_track(
+            &second,
+            &id,
+            AudioFile::from_properties(
+                audio_id,
+                audio.object_key().into(),
+                audio.playback_url().clone(),
+                AudioProperties::new(MediaType::Wav, 44100, Some(16), 2, Some(1411200)).unwrap(),
+            ),
+        );
 
         let release = Release::new(
             id,
             vec![
                 first_original.clone(),
                 duplicate,
-                sample_fixture()
-                    .build_track(first_original.0.release_id())
-                    .unwrap(),
+                sample_track(
+                    &sample_metadata(),
+                    first_original.0.release_id(),
+                    sample_audio_file(),
+                ),
             ],
         )
         .unwrap();
@@ -282,19 +309,19 @@ mod tests {
 
     #[test]
     fn release_new_checks_all_release_metadata_before_excluding_duplicates() {
-        let source = sample_fixture();
-        let id = source.build_release_metadata().unwrap().id().clone();
-        let original = sample_fixture().build_track(&id).unwrap();
+        let source = sample_metadata();
+        let id = release_metadata(&source).unwrap().id().clone();
+        let original = sample_track(&sample_metadata(), &id, sample_audio_file());
 
         for field in ["title", "credits"] {
-            let mut changed = sample_fixture();
+            let mut changed = sample_metadata();
 
             match field {
                 "title" => changed.release_title_mut().push(' '),
-                _ => changed.release_artists_mut().names_mut()[0].push(' '),
+                _ => changed.release_credit_mut().names_mut()[0].push(' '),
             }
 
-            let duplicate = changed.build_track(&id).unwrap();
+            let duplicate = sample_track(&changed, &id, sample_audio_file());
 
             assert_eq!(original.0.id(), duplicate.0.id());
 
@@ -307,20 +334,23 @@ mod tests {
 
     #[test]
     fn release_new_rejects_empty_releases_wrong_membership_and_reused_audio_ids() {
-        let source = sample_fixture();
-        let id = source.build_release_metadata().unwrap().id().clone();
+        let source = sample_metadata();
+        let id = release_metadata(&source).unwrap().id().clone();
 
         assert!(matches!(
             Release::new(id.clone(), vec![]),
             Err(ReleaseValidationError::Empty)
         ));
 
-        let mut other = sample_fixture();
+        let mut other = sample_metadata();
         other.release_title_mut().push_str(" Other");
-        let other_id = other.build_release_metadata().unwrap().id().clone();
+        let other_id = release_metadata(&other).unwrap().id().clone();
 
         assert!(matches!(
-            Release::new(id.clone(), vec![other.build_track(&other_id).unwrap()]),
+            Release::new(
+                id.clone(),
+                vec![sample_track(&other, &other_id, sample_audio_file())]
+            ),
             Err(ReleaseValidationError::WrongRelease { .. })
         ));
 
@@ -331,8 +361,8 @@ mod tests {
             Release::new(
                 id.clone(),
                 vec![
-                    sample_fixture().build_track(&id).unwrap(),
-                    other.build_track(&id).unwrap()
+                    sample_track(&sample_metadata(), &id, sample_audio_file()),
+                    sample_track(&other, &id, sample_audio_file())
                 ]
             ),
             Err(ReleaseValidationError::DuplicateAudioFile { .. })
@@ -365,49 +395,37 @@ mod tests {
 
     #[test]
     fn release_metadata_new_uses_only_release_credits_and_changes_with_release_metadata() {
-        let source = sample_fixture();
-        let first = source.build_release_metadata().unwrap();
+        let source = sample_metadata();
+        let first = release_metadata(&source).unwrap();
 
-        let mut changed = sample_fixture();
-        *changed.track_artists_mut().names_mut() = vec!["Different Track Performer".into()];
+        let mut changed = sample_metadata();
+        *changed.track_credit_mut().names_mut() = vec!["Different Track Performer".into()];
 
-        assert_eq!(first.id(), changed.build_release_metadata().unwrap().id());
+        assert_eq!(first.id(), release_metadata(&changed).unwrap().id());
 
         changed.release_title_mut().push_str(" Revised");
 
-        assert_ne!(first.id(), changed.build_release_metadata().unwrap().id());
+        assert_ne!(first.id(), release_metadata(&changed).unwrap().id());
     }
 
     #[test]
     fn release_metadata_new_rejects_missing_titles_and_artist_credits() {
-        for field in ["title", "credits", "artist_name"] {
-            let mut fixture = sample_fixture();
-
-            match field {
-                "title" => *fixture.release_title_mut() = " \t".into(),
-                "credits" => fixture.release_artists_mut().names_mut().clear(),
-                _ => *fixture.release_artists_mut().names_mut() = vec![" \t".into()],
-            }
-
-            let error = fixture.build_release_metadata().unwrap_err();
-
-            assert!(matches!(
-                (field, error),
-                ("title", ReleaseMetadataValidationError::MissingTitle)
-                    | (
-                        "credits",
-                        ReleaseMetadataValidationError::ArtistCredits(
-                            ArtistCreditValidationError::NameMbidMismatch
-                        )
-                    )
-                    | (
-                        "artist_name",
-                        ReleaseMetadataValidationError::ArtistCredits(
-                            ArtistCreditValidationError::MissingName
-                        )
-                    )
-            ));
-        }
+        assert!(matches!(
+            ReleaseMetadata::new(" \t", "2026", &["Artist".into()], &[]),
+            Err(ReleaseMetadataValidationError::MissingTitle)
+        ));
+        assert!(matches!(
+            ReleaseMetadata::new("Release", "2026", &[], &[]),
+            Err(ReleaseMetadataValidationError::ArtistCredits(
+                ArtistCreditValidationError::NameMbidMismatch
+            ))
+        ));
+        assert!(matches!(
+            ReleaseMetadata::new("Release", "2026", &[" \t".into()], &[]),
+            Err(ReleaseMetadataValidationError::ArtistCredits(
+                ArtistCreditValidationError::MissingName
+            ))
+        ));
     }
 
     #[test]
@@ -420,16 +438,24 @@ mod tests {
             Err(ReleasesValidationError::DuplicateRelease { .. })
         ));
 
-        let mut other = MetadataFixture::from(&source);
+        let mut other = source.clone();
         other.release_title_mut().push_str(" Other");
 
         assert!(matches!(
-            validate_releases(&[first.clone(), other.release()]),
+            validate_releases(&[first.clone(), sample_release(&other)]),
             Err(ReleasesValidationError::SharedAudioFile { .. })
         ));
 
-        *other.audio_file_mut().id_mut() = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
-        let second = other.release();
+        let audio_id = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
+        let audio = sample_audio_file();
+        let id = release_metadata(&other).unwrap().id().clone();
+        let audio = AudioFile::from_properties(
+            audio_id,
+            audio.object_key().into(),
+            audio.playback_url().clone(),
+            AudioProperties::new(MediaType::Wav, 44100, Some(16), 2, Some(1411200)).unwrap(),
+        );
+        let second = Release::new(id.clone(), vec![sample_track(&other, &id, audio)]).unwrap();
 
         assert!(validate_releases(&[first.clone(), second.clone()]).is_ok());
     }

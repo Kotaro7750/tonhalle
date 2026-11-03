@@ -107,3 +107,115 @@ impl MetadataIndex for InMemoryMetadataIndex {
         self.tracks.get(id).cloned().ok_or(GetTrackError::NotFound)
     }
 }
+
+/// Verifies index lookup, ordering, and cursor continuation independently of HTTP.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{domain::ingestion::metadata::sample_metadata, test_support::sample_release};
+
+    /// Builds distinct releases without parsing audio files.
+    fn releases() -> Vec<Release> {
+        (0..3)
+            .map(|i| {
+                let mut fixture = sample_metadata();
+                *fixture.release_title_mut() = format!("Release {i}");
+                sample_release(&fixture)
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn list_releases_preserves_order_and_resumes_without_duplicates_when_limit_changes() {
+        let index = InMemoryMetadataIndex::new(releases());
+        let all = index.list_releases(100, None).await.unwrap();
+        assert!(
+            all.items()
+                .windows(2)
+                .all(|pair| pair[0].id() < pair[1].id())
+        );
+        let first = index.list_releases(1, None).await.unwrap();
+        assert_eq!(first.items().len(), 1);
+        let rest = index
+            .list_releases(100, first.next_cursor().map(str::to_owned))
+            .await
+            .unwrap();
+        assert!(rest.next_cursor().is_none());
+        let ids: Vec<_> = first
+            .items()
+            .iter()
+            .chain(rest.items())
+            .map(|r| r.id())
+            .collect();
+        assert_eq!(ids, all.items().iter().map(|r| r.id()).collect::<Vec<_>>());
+
+        let mut cursor = None;
+        let mut ids = Vec::new();
+        loop {
+            let page = index.list_releases(1, cursor).await.unwrap();
+            ids.extend(page.items().iter().map(|r| r.id().clone()));
+            cursor = page.next_cursor().map(str::to_owned);
+            if cursor.is_none() {
+                break;
+            }
+        }
+        assert_eq!(
+            ids,
+            all.items()
+                .iter()
+                .map(|r| r.id().clone())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn list_releases_rejects_malformed_and_unknown_cursor_positions() {
+        let index = InMemoryMetadataIndex::new(releases());
+        for cursor in [
+            "invalid".to_owned(),
+            URL_SAFE_NO_PAD.encode("wrong-version"),
+            URL_SAFE_NO_PAD.encode([0xff]),
+            URL_SAFE_NO_PAD.encode(format!(
+                "tonhalle-release-cursor-v0:release-{}",
+                "0".repeat(64)
+            )),
+        ] {
+            assert!(matches!(
+                index.list_releases(1, Some(cursor)).await,
+                Err(ListReleasesError::InvalidCursor)
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn metadata_index_returns_empty_pages_and_not_found_for_absent_entities() {
+        let release = releases().remove(0);
+        let index = InMemoryMetadataIndex::new(vec![]);
+        let page = index.list_releases(30, None).await.unwrap();
+        assert!(page.items().is_empty());
+        assert!(page.next_cursor().is_none());
+        assert!(matches!(
+            index.get_release(release.id()).await,
+            Err(GetReleaseError::NotFound)
+        ));
+        assert!(matches!(
+            index.get_track(release.tracks()[0].id()).await,
+            Err(GetTrackError::NotFound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn metadata_index_looks_up_the_requested_release_and_track() {
+        let releases = releases();
+        let index = InMemoryMetadataIndex::new(releases.clone());
+        for release in releases {
+            assert_eq!(
+                index.get_release(release.id()).await.unwrap().id(),
+                release.id()
+            );
+            for track in release.tracks() {
+                assert_eq!(index.get_track(track.id()).await.unwrap().id(), track.id());
+            }
+        }
+    }
+}

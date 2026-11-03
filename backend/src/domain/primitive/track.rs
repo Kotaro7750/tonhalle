@@ -161,122 +161,87 @@ fn number(value: &str) -> Option<u32> {
     number.parse::<u32>().ok().filter(|n| *n > 0)
 }
 
-/// Verifies validated track positions, required display values, and duration limits.
+/// Verifies track constraints directly at metadata construction.
 #[cfg(test)]
 mod tests {
-    use super::TrackValidationError;
+    use super::*;
     use crate::{
-        domain::{artist_credit::ArtistCreditValidationError, ingestion::IngestTrackError},
-        test_support::sample_fixture,
+        domain::artist_credit::ArtistCreditValidationError, test_support::sample_audio_file,
     };
 
     #[test]
     fn track_metadata_new_requires_positive_positions_and_ignores_totals() {
-        let mut fixture = sample_fixture();
-        let release = fixture.build_release_metadata().unwrap();
-
-        *fixture.disc_number_mut() = "001/2".into();
-        *fixture.track_number_mut() = "002/12".into();
-
-        let (track, _) = fixture.build_track(release.id()).unwrap();
-
+        let id = format!("release-{}", "a".repeat(64)).parse().unwrap();
+        let names = ["Artist".into()];
+        let track = TrackMetadata::new(&id, "Track", "001/2", "002/12", None, &names, &[]).unwrap();
         assert_eq!(track.disc_number(), 1);
         assert_eq!(track.track_number(), 2);
-
-        *fixture.disc_number_mut() = "1".into();
-        *fixture.track_number_mut() = "2".into();
-
         assert_eq!(
             track.id(),
-            fixture.build_track(release.id()).unwrap().0.id()
+            TrackMetadata::new(&id, "Track", "1", "2", None, &names, &[])
+                .unwrap()
+                .id()
         );
-
-        for field in ["disc", "track"] {
-            for invalid in ["", "0", "-1", "+1", "1.0", " 1"] {
-                let mut fixture = sample_fixture();
-
-                match field {
-                    "disc" => *fixture.disc_number_mut() = invalid.into(),
-                    _ => *fixture.track_number_mut() = invalid.into(),
-                }
-
-                let error = fixture.build_track(release.id()).unwrap_err();
-
-                match field {
-                    "disc" => assert!(matches!(
-                        error,
-                        IngestTrackError::InvalidTrack(TrackValidationError::InvalidDiscNumber)
-                    )),
-                    _ => assert!(matches!(
-                        error,
-                        IngestTrackError::InvalidTrack(TrackValidationError::InvalidTrackNumber)
-                    )),
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn track_metadata_new_rejects_missing_titles_and_artist_credits() {
-        let release = sample_fixture().build_release_metadata().unwrap();
-
-        for field in ["title", "credits", "artist_name"] {
-            let mut fixture = sample_fixture();
-
-            match field {
-                "title" => *fixture.track_title_mut() = " \t".into(),
-                "credits" => fixture.track_artists_mut().names_mut().clear(),
-                _ => *fixture.track_artists_mut().names_mut() = vec![" \t".into()],
-            }
-
-            let error = fixture.build_track(release.id()).unwrap_err();
-
+        for invalid in ["", "0", "-1", "+1", "1.0", " 1"] {
             assert!(matches!(
-                (field, error),
-                (
-                    "title",
-                    IngestTrackError::InvalidTrack(TrackValidationError::MissingTitle)
-                ) | (
-                    "credits",
-                    IngestTrackError::InvalidTrack(TrackValidationError::ArtistCredits(
-                        ArtistCreditValidationError::NameMbidMismatch
-                    ))
-                ) | (
-                    "artist_name",
-                    IngestTrackError::InvalidTrack(TrackValidationError::ArtistCredits(
-                        ArtistCreditValidationError::MissingName
-                    ))
-                )
+                TrackMetadata::new(&id, "Track", invalid, "1", None, &names, &[]),
+                Err(TrackValidationError::InvalidDiscNumber)
+            ));
+            assert!(matches!(
+                TrackMetadata::new(&id, "Track", "1", invalid, None, &names, &[]),
+                Err(TrackValidationError::InvalidTrackNumber)
             ));
         }
     }
 
     #[test]
-    fn track_metadata_new_accepts_zero_duration_and_rejects_duration_overflow() {
-        let mut fixture = sample_fixture();
-        let release = fixture.build_release_metadata().unwrap();
-
-        for duration in [0, u128::from(u32::MAX)] {
-            *fixture.duration_ms_mut() = Some(duration);
-
-            let (track, _) = fixture.build_track(release.id()).unwrap();
-
-            assert_eq!(track.duration_ms().map(u128::from), Some(duration));
-        }
-
-        let known_id = fixture.build_track(release.id()).unwrap().0.id().clone();
-        *fixture.duration_ms_mut() = None;
-        let unknown = fixture.build_track(release.id()).unwrap().0;
-        assert!(unknown.duration_ms().is_none());
-        assert_eq!(unknown.id(), &known_id);
-
-        *fixture.duration_ms_mut() = Some(u128::from(u32::MAX) + 1);
-
+    fn track_metadata_new_rejects_missing_titles_and_artist_credits() {
+        let id = format!("release-{}", "a".repeat(64)).parse().unwrap();
         assert!(matches!(
-            fixture.build_track(release.id()),
-            Err(IngestTrackError::InvalidTrack(
-                TrackValidationError::DurationOverflow
+            TrackMetadata::new(&id, " \t", "1", "1", None, &["Artist".into()], &[]),
+            Err(TrackValidationError::MissingTitle)
+        ));
+        assert!(matches!(
+            TrackMetadata::new(&id, "Track", "1", "1", None, &[], &[]),
+            Err(TrackValidationError::ArtistCredits(
+                ArtistCreditValidationError::NameMbidMismatch
             ))
         ));
+        assert!(matches!(
+            TrackMetadata::new(&id, "Track", "1", "1", None, &[" \t".into()], &[]),
+            Err(TrackValidationError::ArtistCredits(
+                ArtistCreditValidationError::MissingName
+            ))
+        ));
+    }
+
+    #[test]
+    fn track_metadata_new_accepts_zero_duration_and_rejects_duration_overflow() {
+        let id = format!("release-{}", "a".repeat(64)).parse().unwrap();
+        let names = ["Artist".into()];
+        let unknown = TrackMetadata::new(&id, "Track", "1", "1", None, &names, &[]).unwrap();
+        assert_eq!(unknown.duration_ms(), None);
+        for duration in [0, u128::from(u32::MAX)] {
+            let metadata =
+                TrackMetadata::new(&id, "Track", "1", "1", Some(duration), &names, &[]).unwrap();
+            assert_eq!(metadata.duration_ms().map(u128::from), Some(duration));
+            assert_eq!(metadata.id(), unknown.id());
+        }
+        assert!(matches!(
+            TrackMetadata::new(
+                &id,
+                "Track",
+                "1",
+                "1",
+                Some(u128::from(u32::MAX) + 1),
+                &names,
+                &[]
+            ),
+            Err(TrackValidationError::DurationOverflow)
+        ));
+        let audio = sample_audio_file();
+        let audio_id = audio.id();
+        let track = Track::new(unknown, audio);
+        assert_eq!(track.original_audio_file().id(), audio_id);
     }
 }

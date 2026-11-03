@@ -84,3 +84,159 @@ impl ImportMusicUseCase {
         Ok(summary)
     }
 }
+
+/// Verifies import orchestration using controlled source and storage outcomes.
+#[cfg(test)]
+mod tests {
+    use std::{collections::VecDeque, io::Error as IoError, sync::Mutex};
+
+    use super::*;
+    use crate::{
+        domain::{ingestion::metadata::sample_metadata, primitive::release::Release},
+        port::{
+            import_source::ImportCandidate,
+            music_storage::{ReleaseScanFailure, ScanReleasesError},
+        },
+        test_support::sample_audio,
+    };
+
+    /// Provides opaque candidates and deterministic read outcomes.
+    struct Source {
+        candidates: Vec<Vec<String>>,
+        bytes: Vec<u8>,
+        unavailable: bool,
+    }
+
+    impl ImportSource for Source {
+        /// Returns ordered candidates or a fatal enumeration failure.
+        fn list_releases(&self) -> Result<Vec<ImportCandidate>, ListImportReleasesError> {
+            if self.unavailable {
+                return Err(ListImportReleasesError::new(IoError::other("unavailable")));
+            }
+            Ok(self
+                .candidates
+                .iter()
+                .enumerate()
+                .map(|(i, keys)| ImportCandidate::new(i.to_string(), keys.clone()))
+                .collect())
+        }
+
+        /// Simulates a read failure, invalid bytes, or valid source audio.
+        fn read_audio(&self, key: &str) -> Result<Vec<u8>, ReadImportAudioError> {
+            match key {
+                "unreadable" => Err(ReadImportAudioError::InvalidObject { key: key.into() }),
+                "invalid" => Ok(b"invalid".to_vec()),
+                _ => Ok(self.bytes.clone()),
+            }
+        }
+    }
+
+    /// Captures submitted bytes and controls each save outcome.
+    struct Storage {
+        outcomes: Mutex<VecDeque<Result<SaveReleaseOutcome, ()>>>,
+        saved: Mutex<Vec<Vec<Vec<u8>>>>,
+    }
+
+    impl MusicStorage for Storage {
+        /// Records valid releases and returns the configured outcome.
+        fn save_release(
+            &self,
+            release: &ImportRelease,
+        ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
+            self.saved.lock().unwrap().push(
+                release
+                    .audio()
+                    .iter()
+                    .map(|audio| audio.bytes().to_vec())
+                    .collect(),
+            );
+            self.outcomes
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("unexpected save")
+                .map_err(|()| SaveReleaseError::Conflict {
+                    id: release.id().clone(),
+                })
+        }
+
+        /// Import must never read the destination index.
+        fn scan_releases(
+            &self,
+        ) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError> {
+            panic!("import must not scan storage")
+        }
+    }
+
+    #[test]
+    fn execute_continues_after_candidate_failures_and_counts_save_outcomes() {
+        let bytes = sample_audio(&sample_metadata());
+        let source = Arc::new(Source {
+            candidates: vec![
+                vec!["unreadable".into()],
+                vec!["invalid".into()],
+                vec!["save-failure".into()],
+                vec!["existing".into()],
+                vec!["success".into()],
+            ],
+            bytes: bytes.clone(),
+            unavailable: false,
+        });
+        let storage = Arc::new(Storage {
+            outcomes: Mutex::new(VecDeque::from([
+                Err(()),
+                Ok(SaveReleaseOutcome::AlreadyExists),
+                Ok(SaveReleaseOutcome::Saved),
+            ])),
+            saved: Mutex::new(vec![]),
+        });
+        let result = ImportMusicUseCase::new(source, storage.clone())
+            .execute()
+            .unwrap();
+        assert_eq!(
+            (result.saved(), result.skipped(), result.failed()),
+            (1, 1, 3)
+        );
+        assert_eq!(*storage.saved.lock().unwrap(), vec![vec![bytes]; 3]);
+        assert!(storage.outcomes.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn execute_propagates_enumeration_failures_without_saving() {
+        let source = Arc::new(Source {
+            candidates: vec![],
+            bytes: vec![],
+            unavailable: true,
+        });
+        let storage = Arc::new(Storage {
+            outcomes: Mutex::new(VecDeque::new()),
+            saved: Mutex::new(vec![]),
+        });
+        assert!(matches!(
+            ImportMusicUseCase::new(source, storage.clone()).execute(),
+            Err(ImportMusicError::ListReleases(_))
+        ));
+        assert!(storage.saved.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn execute_returns_an_empty_summary_when_there_are_no_candidates() {
+        let source = Arc::new(Source {
+            candidates: vec![],
+            bytes: vec![],
+            unavailable: false,
+        });
+        let storage = Arc::new(Storage {
+            outcomes: Mutex::new(VecDeque::new()),
+            saved: Mutex::new(vec![]),
+        });
+        let result = ImportMusicUseCase::new(source, storage.clone())
+            .execute()
+            .unwrap();
+        assert_eq!(
+            (result.saved(), result.skipped(), result.failed()),
+            (0, 0, 0)
+        );
+        assert!(storage.saved.lock().unwrap().is_empty());
+    }
+}

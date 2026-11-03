@@ -90,12 +90,13 @@ impl ImportRelease {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{sample_audio, sample_fixture};
+    use crate::domain::ingestion::metadata::sample_metadata;
+    use crate::test_support::sample_audio;
 
     #[test]
     fn import_release_rejects_duplicates_inconsistent_metadata_and_invalid_sources() {
-        let fixture = sample_fixture();
-        let original = sample_audio(&fixture.build());
+        let fixture = sample_metadata();
+        let original = sample_audio(&fixture);
         assert!(matches!(
             ImportRelease::new(vec![]),
             Err(ImportValidationError::Empty)
@@ -105,23 +106,21 @@ mod tests {
             Err(ImportValidationError::DuplicateTrack(_))
         ));
 
-        let mut changed = sample_fixture();
+        let mut changed = sample_metadata();
         changed.release_title_mut().push_str(" changed");
         assert!(matches!(
-            ImportRelease::new(vec![original.clone(), sample_audio(&changed.build())]),
+            ImportRelease::new(vec![original.clone(), sample_audio(&changed)]),
             Err(ImportValidationError::MetadataMismatch)
         ));
         for field in 0..4 {
-            let mut invalid = sample_fixture();
+            let mut invalid = sample_metadata();
             match field {
                 0 => invalid.track_title_mut().clear(),
                 1 => *invalid.release_date_mut() = "2026-02-30".into(),
                 2 => *invalid.disc_number_mut() = "0".into(),
-                _ => invalid.track_artists_mut().names_mut().clear(),
+                _ => invalid.track_credit_mut().names_mut().clear(),
             }
-            assert!(
-                ImportRelease::new(vec![original.clone(), sample_audio(&invalid.build())]).is_err()
-            );
+            assert!(ImportRelease::new(vec![original.clone(), sample_audio(&invalid)]).is_err());
         }
     }
 }

@@ -57,9 +57,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        domain::{id::ReleaseId, import::ImportRelease},
+        domain::{id::ReleaseId, import::ImportRelease, ingestion::metadata::sample_metadata},
         port::music_storage::{ReleaseScanFailure, SaveReleaseError, SaveReleaseOutcome},
-        test_support::{sample_metadata, sample_release},
+        test_support::sample_release,
     };
 
     /// Simulates a fatal storage enumeration failure.
@@ -122,7 +122,7 @@ mod tests {
     }
 
     #[test]
-    fn execute_keeps_valid_releases_and_propagates_collection_conflicts() {
+    fn execute_keeps_valid_releases_when_individual_candidates_fail() {
         let release = sample_release(&sample_metadata());
 
         let accepted =
@@ -132,7 +132,11 @@ mod tests {
 
         assert_eq!(accepted.len(), 1);
         assert_eq!(accepted[0].id(), release.id());
+    }
 
+    #[test]
+    fn execute_propagates_collection_conflicts() {
+        let release = sample_release(&sample_metadata());
         assert!(matches!(
             BuildMetadataIndexUseCase::new(Arc::new(FixtureStorage(vec![
                 release.clone(),

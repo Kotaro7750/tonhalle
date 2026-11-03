@@ -1,6 +1,6 @@
 //! Exposes backend configuration grouped by responsibility.
 
-mod content_storage;
 pub(crate) mod import;
-mod import_storages;
+mod import_source;
+pub(crate) mod music_storage;
 pub(crate) mod server;

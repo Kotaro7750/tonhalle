@@ -23,14 +23,15 @@ CORS is disabled when no origin is provided.
 | --- | --- | --- | --- | --- |
 | `TONHALLE_CORS_ORIGIN` | `--cors-origin` | No | - | A single HTTP(S) browser origin without a path or trailing slash. |
 
-## Content Storage
+## Music Storage
 
 Provide required settings through CLI arguments or environment variables.
 
 | Variable | CLI argument | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `TONHALLE_CONTENT_STORAGE__ROOT_PATH` | `--content-storage--root-path` | Yes | - | Existing audio directory scanned at startup. Mount it when using a container. |
-| `TONHALLE_CONTENT_STORAGE__PLAYBACK_URL_BASE` | `--content-storage--playback-url-base` | Yes | - | HTTP(S) directory URL for playback links; query strings and fragments are rejected. |
+| `TONHALLE_MUSIC_STORAGE__MODE` | `--music-storage--mode` | No | `filesystem` | Music-storage implementation. |
+| `TONHALLE_MUSIC_STORAGE__ROOT_PATH` | `--music-storage--root-path` | Yes | - | Existing audio directory scanned at startup. Mount it when using a container. |
+| `TONHALLE_MUSIC_STORAGE__PLAYBACK_URL_BASE` | `--music-storage--playback-url-base` | Yes | - | HTTP(S) directory URL for playback links; query strings and fragments are rejected. |
 
 ## Logging
 

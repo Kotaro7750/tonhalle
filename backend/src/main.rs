@@ -27,7 +27,4 @@ async fn main() -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
-mod tests;
-
-#[cfg(test)]
 mod test_support;

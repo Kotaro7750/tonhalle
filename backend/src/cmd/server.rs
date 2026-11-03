@@ -13,12 +13,12 @@ use tower_http::{
 };
 
 use crate::{
-    config::server::{CorsOriginError, ServerConfig, ServerConfigError},
-    controller::MusicController,
-    infrastructure::{
-        metadata_index::InMemoryMetadataIndex,
-        music_storage::filesystem::FileSystemContentStorageConstructionError,
+    config::{
+        music_storage::MusicStorageConfigError,
+        server::{CorsOriginError, ServerConfig, ServerConfigError},
     },
+    controller::MusicController,
+    infrastructure::metadata_index::InMemoryMetadataIndex,
     usecase::{
         GetReleaseUseCase, GetTrackUseCase, ListReleasesUseCase,
         build_metadata_index::{BuildMetadataIndexError, BuildMetadataIndexUseCase},
@@ -36,7 +36,7 @@ pub(crate) enum ServerError {
     Cors(#[from] CorsOriginError),
     /// Music storage cannot be initialized.
     #[error(transparent)]
-    Storage(#[from] FileSystemContentStorageConstructionError),
+    Storage(#[from] MusicStorageConfigError),
     /// Startup indexing failed.
     #[error(transparent)]
     Index(#[from] BuildMetadataIndexError),
@@ -53,7 +53,7 @@ pub(crate) async fn run(config: &ServerConfig) -> Result<(), ServerError> {
     config.validate()?;
     let cors_origin = config.cors_origin()?;
 
-    let storage = config.content_storage().construct_music_storage()?;
+    let storage = config.music_storage().construct_music_storage()?;
 
     tracing::info!("Scanning music storage");
     let releases =

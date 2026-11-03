@@ -107,3 +107,6 @@ struct ListReleasesQuery {
     cursor: Option<String>,
     limit: Option<u8>,
 }
+
+#[cfg(test)]
+mod tests;

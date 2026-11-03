@@ -22,60 +22,6 @@ use crate::{
     },
 };
 
-/// A failure to construct a filesystem storage from its settings.
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum FileSystemContentStorageConstructionError {
-    /// The configured destination cannot be resolved.
-    #[error("resolving content storage root: {0}")]
-    ResolveRoot(#[from] IoError),
-    /// The resolved destination does not satisfy storage requirements.
-    #[error(transparent)]
-    Storage(#[from] FileSystemStorageConstructionError),
-}
-
-/// CLI settings and construction rules shared by filesystem music-storage consumers.
-#[derive(getset::Getters, Debug, clap::Args)]
-pub(crate) struct FileSystemContentStorageConfig {
-    /// Existing directory holding stored audio releases.
-    #[arg(
-        id = "content_storage_root_path",
-        long = "content-storage--root-path",
-        env = "TONHALLE_CONTENT_STORAGE__ROOT_PATH"
-    )]
-    /// Provides the filesystem destination for adapter-specific compatibility checks.
-    #[getset(get = "pub(crate)")]
-    root_path: PathBuf,
-    /// Optional delivery endpoint used when reading stored releases.
-    #[arg(
-        id = "content_storage_playback_url_base",
-        long = "content-storage--playback-url-base",
-        env = "TONHALLE_CONTENT_STORAGE__PLAYBACK_URL_BASE"
-    )]
-    playback_url_base: Option<Url>,
-}
-
-impl FileSystemContentStorageConfig {
-    /// Requires a valid delivery endpoint for operations that read playable releases.
-    pub(crate) fn validate_playback_url(&self) -> Result<(), FileSystemStorageConstructionError> {
-        let mut url = self
-            .playback_url_base
-            .clone()
-            .ok_or(FileSystemStorageConstructionError::MissingPlaybackUrlBase)?;
-        normalize_playback_url(&mut url)
-    }
-
-    /// Constructs storage with the optional delivery endpoint preserved.
-    pub(crate) fn construct_music_storage(
-        &self,
-    ) -> Result<FileSystemMusicStorage, FileSystemContentStorageConstructionError> {
-        let root = self.root_path.canonicalize()?;
-        Ok(match &self.playback_url_base {
-            Some(url) => FileSystemMusicStorage::new(root, url.clone())?,
-            None => FileSystemMusicStorage::for_import(root)?,
-        })
-    }
-}
-
 /// A filesystem adapter for reading and saving stored audio releases.
 pub(crate) struct FileSystemMusicStorage {
     root_path: PathBuf,
@@ -91,9 +37,6 @@ pub(crate) enum FileSystemStorageConstructionError {
     /// Playback links cannot be built from the configured delivery endpoint.
     #[error("playback URL base must be an HTTP(S) directory URL without query or fragment")]
     InvalidPlaybackUrlBase,
-    /// Reading playable releases requires a configured delivery endpoint.
-    #[error("content-storage--playback-url-base is required for playback")]
-    MissingPlaybackUrlBase,
 }
 
 /// A failure to read a stored audio file or resolve its location.
@@ -126,7 +69,7 @@ enum ReadAudioFileError {
 #[derive(Debug, thiserror::Error)]
 enum FileSystemScanError {
     /// Traversal failed before the complete set of audio files could be read.
-    #[error("enumerating content storage: {0}")]
+    #[error("enumerating music storage: {0}")]
     Enumerate(#[source] walkdir::Error),
     /// The audio path cannot be grouped into a parent storage release.
     #[error("missing release directory")]
@@ -134,7 +77,9 @@ enum FileSystemScanError {
 }
 
 /// Validates and normalizes a delivery endpoint consistently for configuration and storage.
-fn normalize_playback_url(url: &mut Url) -> Result<(), FileSystemStorageConstructionError> {
+pub(crate) fn normalize_playback_url(
+    url: &mut Url,
+) -> Result<(), FileSystemStorageConstructionError> {
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
         || url.query().is_some()
@@ -279,6 +224,51 @@ impl FileSystemMusicStorage {
         build_release(id.clone(), tracks)
             .map_err(|source| ReleaseScanFailure::InvalidRelease { id, source })
     }
+
+    /// Writes original bytes and UUID filenames before exposing a complete release.
+    fn persist_release(
+        &self,
+        release: &ImportRelease,
+    ) -> Result<SaveReleaseOutcome, FileSystemSaveReleaseError> {
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.root_path.join(".tonhalle-import.lock"))?;
+        lock.lock()?;
+
+        let destination = self.root_path.join(release.id().as_ref());
+        match symlink_metadata(&destination) {
+            Ok(metadata) if metadata.is_dir() => return Ok(SaveReleaseOutcome::AlreadyExists),
+            Ok(_) => {
+                return Err(FileSystemSaveReleaseError::ConflictingDestination);
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+
+        let staging_root = self.root_path.join(STAGING_DIRECTORY);
+        create_dir_all(&staging_root)?;
+        if symlink_metadata(&staging_root)?.file_type().is_symlink() {
+            return Err(FileSystemSaveReleaseError::InvalidStagingDirectory);
+        }
+        let staging = tempfile::tempdir_in(staging_root)?;
+        for audio in release.audio() {
+            let extension = audio.properties().media_type().extension();
+            let mut file = OpenOptions::new().write(true).create_new(true).open(
+                staging
+                    .path()
+                    .join(format!("{}.{}", uuid::Uuid::new_v4(), extension)),
+            )?;
+            file.write_all(audio.bytes())?;
+            file.sync_all()?;
+        }
+        File::open(staging.path())?.sync_all()?;
+        rename(staging.path(), destination)?;
+        File::open(&self.root_path)?.sync_all()?;
+        Ok(SaveReleaseOutcome::Saved)
+    }
 }
 
 impl MusicStorage for FileSystemMusicStorage {
@@ -287,7 +277,16 @@ impl MusicStorage for FileSystemMusicStorage {
         &self,
         release: &ImportRelease,
     ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
-        save_release(&self.root_path, release)
+        self.persist_release(release)
+            .map_err(|source| match source {
+                FileSystemSaveReleaseError::ConflictingDestination => SaveReleaseError::Conflict {
+                    id: release.id().clone(),
+                },
+                source => SaveReleaseError::Internal {
+                    id: release.id().clone(),
+                    source: Box::new(source),
+                },
+            })
     }
 
     /// Groups audio paths by their stored release directory and constructs domain releases.
@@ -371,115 +370,25 @@ enum FileSystemSaveReleaseError {
     Io(#[from] IoError),
 }
 
-/// Converts physical save failures to release-specific port errors.
-fn save_release(
-    root: &Path,
-    release: &ImportRelease,
-) -> Result<SaveReleaseOutcome, SaveReleaseError> {
-    persist_release(root, release).map_err(|source| match source {
-        FileSystemSaveReleaseError::ConflictingDestination => SaveReleaseError::Conflict {
-            id: release.id().clone(),
-        },
-        source => SaveReleaseError::Internal {
-            id: release.id().clone(),
-            source: Box::new(source),
-        },
-    })
-}
-
-/// Writes original bytes and UUID filenames before exposing a complete release.
-fn persist_release(
-    root: &Path,
-    release: &ImportRelease,
-) -> Result<SaveReleaseOutcome, FileSystemSaveReleaseError> {
-    let lock = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(root.join(".tonhalle-import.lock"))?;
-    lock.lock()?;
-
-    let destination = root.join(release.id().as_ref());
-    match symlink_metadata(&destination) {
-        Ok(metadata) if metadata.is_dir() => return Ok(SaveReleaseOutcome::AlreadyExists),
-        Ok(_) => {
-            return Err(FileSystemSaveReleaseError::ConflictingDestination);
-        }
-        Err(error) if error.kind() == ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
-    }
-
-    let staging_root = root.join(STAGING_DIRECTORY);
-    create_dir_all(&staging_root)?;
-    if symlink_metadata(&staging_root)?.file_type().is_symlink() {
-        return Err(FileSystemSaveReleaseError::InvalidStagingDirectory);
-    }
-    let staging = tempfile::tempdir_in(staging_root)?;
-    for audio in release.audio() {
-        let extension = audio.properties().media_type().extension();
-        let mut file =
-            OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(
-                    staging
-                        .path()
-                        .join(format!("{}.{}", uuid::Uuid::new_v4(), extension)),
-                )?;
-        file.write_all(audio.bytes())?;
-        file.sync_all()?;
-    }
-    File::open(staging.path())?.sync_all()?;
-    rename(staging.path(), destination)?;
-    File::open(root)?.sync_all()?;
-    Ok(SaveReleaseOutcome::Saved)
-}
-
-/// Verifies release identity and physical causes survive the save-port boundary.
+/// Verifies filesystem storage through its scanning and saving contracts.
 #[cfg(test)]
-mod save_tests {
+mod tests {
     use std::{
         error::Error,
-        fs::{read, write},
+        fs::{create_dir, create_dir_all, read, remove_dir, write},
         io::{Error as IoError, ErrorKind},
     };
 
     use super::*;
-    use crate::test_support::{sample_audio, sample_fixture};
-
-    #[test]
-    fn save_release_distinguishes_conflicts_and_preserves_io_failure_causes() {
-        let root = tempfile::tempdir().unwrap();
-        let release = ImportRelease::new(vec![sample_audio(&sample_fixture().build())]).unwrap();
-        let destination = root.path().join(release.id().as_ref());
-        write(&destination, b"existing object").unwrap();
-        assert!(matches!(save_release(root.path(), &release),
-            Err(SaveReleaseError::Conflict { id }) if &id == release.id()));
-        assert_eq!(read(destination).unwrap(), b"existing object");
-
-        let error = save_release(&root.path().join("missing"), &release).unwrap_err();
-        assert!(matches!(&error, SaveReleaseError::Internal { id, .. } if id == release.id()));
-        let io = error
-            .source()
-            .unwrap()
-            .source()
-            .unwrap()
-            .downcast_ref::<IoError>()
-            .unwrap();
-        assert_eq!(io.kind(), ErrorKind::NotFound);
-    }
-}
-
-/// Verifies filesystem scanning through its domain release contract.
-#[cfg(test)]
-mod tests {
-    use std::fs::{create_dir, create_dir_all, read, remove_dir, write};
-
-    use super::*;
     use crate::{
-        domain::{ingestion::IngestTrackError, primitive::release::ReleaseValidationError},
-        test_support::{MetadataFixture, release_metadata, sample_audio, sample_metadata},
+        domain::{
+            ingestion::{
+                IngestTrackError,
+                metadata::{RawMetadata, sample_metadata},
+            },
+            primitive::release::ReleaseValidationError,
+        },
+        test_support::{release_metadata, sample_audio, sample_audio_file},
     };
 
     /// Opens a temporary read-only store with an external playback URL.
@@ -492,17 +401,48 @@ mod tests {
     }
 
     /// Writes a valid source using the filesystem adapter's stored identity layout.
-    fn write_audio(root: &Path, source: &MetadataFixture) -> PathBuf {
-        let raw = source.build();
-        let id = release_metadata(&raw).unwrap().id().clone();
+    fn write_audio(root: &Path, source: &RawMetadata) -> PathBuf {
+        write_audio_with_id(root, source, sample_audio_file().id())
+    }
+
+    /// Writes metadata under an explicitly chosen stored audio identity.
+    fn write_audio_with_id(root: &Path, source: &RawMetadata, audio_id: AudioFileId) -> PathBuf {
+        let id = release_metadata(source).unwrap().id().clone();
         let directory = root.join(id.as_ref());
 
         create_dir_all(&directory).unwrap();
 
-        let path = directory.join(format!("{}.wav", source.audio_file().id()));
-        write(&path, sample_audio(&raw)).unwrap();
+        let path = directory.join(format!("{}.wav", audio_id));
+        write(&path, sample_audio(source)).unwrap();
 
         path
+    }
+
+    #[test]
+    fn save_release_distinguishes_conflicts_and_preserves_io_failure_causes() {
+        let root = tempfile::tempdir().unwrap();
+        let release = ImportRelease::new(vec![sample_audio(&sample_metadata())]).unwrap();
+        let storage = FileSystemMusicStorage::for_import(root.path().to_path_buf()).unwrap();
+        let destination = root.path().join(release.id().as_ref());
+        write(&destination, b"existing object").unwrap();
+        assert!(matches!(storage.save_release(&release),
+            Err(SaveReleaseError::Conflict { id }) if &id == release.id()));
+        assert_eq!(read(destination).unwrap(), b"existing object");
+
+        let missing = root.path().join("missing");
+        std::fs::create_dir(&missing).unwrap();
+        let storage = FileSystemMusicStorage::for_import(missing.clone()).unwrap();
+        std::fs::remove_dir(missing).unwrap();
+        let error = storage.save_release(&release).unwrap_err();
+        assert!(matches!(&error, SaveReleaseError::Internal { id, .. } if id == release.id()));
+        let io = error
+            .source()
+            .unwrap()
+            .source()
+            .unwrap()
+            .downcast_ref::<IoError>()
+            .unwrap();
+        assert_eq!(io.kind(), ErrorKind::NotFound);
     }
 
     #[test]
@@ -510,7 +450,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let nested = temp.path().join("artist with spaces #?%");
         let source = sample_metadata();
-        let path = write_audio(&nested, &MetadataFixture::from(&source));
+        let path = write_audio(&nested, &source.clone());
         let original = read(&path).unwrap();
 
         for _ in 0..2 {
@@ -525,7 +465,7 @@ mod tests {
 
             let audio = release.tracks()[0].original_audio_file();
 
-            assert_eq!(audio.id(), MetadataFixture::from(&source).audio_file().id());
+            assert_eq!(audio.id(), sample_audio_file().id());
             assert_eq!(
                 audio.playback_url().as_str(),
                 format!(
@@ -558,7 +498,7 @@ mod tests {
     fn scan_releases_collects_all_audio_failures_with_their_release_id() {
         let temp = tempfile::tempdir().unwrap();
         let source = sample_metadata();
-        let path = write_audio(temp.path(), &MetadataFixture::from(&source));
+        let path = write_audio(temp.path(), &source.clone());
         let directory = path.parent().unwrap();
 
         write(directory.join("invalid-audio-id.wav"), b"corrupt").unwrap();
@@ -568,17 +508,16 @@ mod tests {
         )
         .unwrap();
 
-        let mut different = MetadataFixture::from(&source);
+        let mut different = source.clone();
         different.release_title_mut().push_str(" Other");
-        *different.audio_file_mut().id_mut() =
-            "925eda40-54cb-4af4-9579-6811fc7477ac".parse().unwrap();
+        let audio_id = "925eda40-54cb-4af4-9579-6811fc7477ac".parse().unwrap();
 
         write(
-            directory.join(format!("{}.wav", different.audio_file().id())),
-            sample_audio(&different.build()),
+            directory.join(format!("{}.wav", audio_id)),
+            sample_audio(&different),
         )
         .unwrap();
-        write_audio(temp.path(), &different);
+        write_audio_with_id(temp.path(), &different, audio_id);
 
         let mut results = storage(temp.path()).scan_releases().unwrap();
 
@@ -620,14 +559,13 @@ mod tests {
     fn scan_releases_reports_release_construction_failures() {
         let temp = tempfile::tempdir().unwrap();
         let source = sample_metadata();
-        write_audio(temp.path(), &MetadataFixture::from(&source));
+        write_audio(temp.path(), &source.clone());
 
-        let mut duplicate = MetadataFixture::from(&source);
+        let mut duplicate = source.clone();
         duplicate.release_title_mut().push(' ');
-        *duplicate.audio_file_mut().id_mut() =
-            "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
+        let audio_id = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
 
-        write_audio(temp.path(), &duplicate);
+        write_audio_with_id(temp.path(), &duplicate, audio_id);
 
         let failure = storage(temp.path())
             .scan_releases()
@@ -665,13 +603,13 @@ mod tests {
     fn scan_releases_groups_all_sources_with_the_same_release_id() {
         let temp = tempfile::tempdir().unwrap();
         let source = sample_metadata();
-        write_audio(&temp.path().join("a"), &MetadataFixture::from(&source));
+        write_audio(&temp.path().join("a"), &source.clone());
 
-        let mut other = MetadataFixture::from(&source);
+        let mut other = source.clone();
         *other.track_number_mut() = "2".into();
-        *other.audio_file_mut().id_mut() = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
+        let audio_id = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
 
-        let second_path = write_audio(&temp.path().join("b"), &other);
+        let second_path = write_audio_with_id(&temp.path().join("b"), &other, audio_id);
 
         let mut results = storage(temp.path()).scan_releases().unwrap();
 
@@ -717,7 +655,7 @@ mod tests {
 
         let temp = tempfile::tempdir().unwrap();
         let source = sample_metadata();
-        let path = write_audio(temp.path(), &MetadataFixture::from(&source));
+        let path = write_audio(temp.path(), &source.clone());
 
         symlink(
             &path,
@@ -740,5 +678,89 @@ mod tests {
         assert!(
             matches!(&failures[0], AudioScanFailure::Read { source, .. } if matches!(source.downcast_ref::<ReadAudioFileError>(), Some(ReadAudioFileError::NotRegularFile)))
         );
+    }
+    #[test]
+    fn save_release_preserves_bytes_and_persistent_uuids_without_overwriting_existing_releases() {
+        let root = tempfile::tempdir().unwrap();
+        let storage = FileSystemMusicStorage::for_import(root.path().to_owned()).unwrap();
+        let mut second = sample_metadata();
+        *second.track_number_mut() = "2".into();
+        let bytes = vec![sample_audio(&sample_metadata()), sample_audio(&second)];
+        let release = ImportRelease::new(bytes.clone()).unwrap();
+        assert_eq!(
+            storage.save_release(&release).unwrap(),
+            SaveReleaseOutcome::Saved
+        );
+        let directory = root.path().join(release.id().as_ref());
+        let snapshot = || {
+            let mut files = std::fs::read_dir(&directory)
+                .unwrap()
+                .map(|entry| {
+                    let path = entry.unwrap().path();
+                    let id: AudioFileId =
+                        path.file_stem().unwrap().to_str().unwrap().parse().unwrap();
+                    (id.to_string(), read(path).unwrap())
+                })
+                .collect::<Vec<_>>();
+            files.sort();
+            files
+        };
+        let original = snapshot();
+        assert_eq!(original.len(), 2);
+        assert_ne!(original[0].0, original[1].0);
+        for (_, stored) in &original {
+            assert!(bytes.contains(stored));
+        }
+        let reopened = FileSystemMusicStorage::for_import(root.path().to_owned()).unwrap();
+        assert_eq!(
+            reopened.save_release(&release).unwrap(),
+            SaveReleaseOutcome::AlreadyExists
+        );
+        assert_eq!(snapshot(), original);
+    }
+
+    #[test]
+    fn save_release_serializes_concurrent_writes() {
+        let root = tempfile::tempdir().unwrap();
+        let storage = std::sync::Arc::new(
+            FileSystemMusicStorage::for_import(root.path().to_owned()).unwrap(),
+        );
+        let release = std::sync::Arc::new(
+            ImportRelease::new(vec![sample_audio(&sample_metadata())]).unwrap(),
+        );
+        let workers: Vec<_> = (0..2)
+            .map(|_| {
+                let storage = storage.clone();
+                let release = release.clone();
+                std::thread::spawn(move || storage.save_release(&release).unwrap())
+            })
+            .collect();
+        let results: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect();
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| **result == SaveReleaseOutcome::Saved)
+                .count(),
+            1
+        );
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| **result == SaveReleaseOutcome::AlreadyExists)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn scan_releases_hides_incomplete_staging() {
+        let root = tempfile::tempdir().unwrap();
+        let partial = root.path().join(STAGING_DIRECTORY).join("interrupted");
+        create_dir_all(&partial).unwrap();
+        write_audio(&partial, &sample_metadata());
+        assert!(storage(root.path()).scan_releases().unwrap().is_empty());
     }
 }
