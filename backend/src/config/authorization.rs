@@ -176,7 +176,13 @@ mod tests {
     };
     use tower::ServiceExt;
 
-    use crate::cmd::server::build_app;
+    use std::sync::Arc;
+
+    use crate::{
+        cmd::server::build_app, controller::content_access::ContentAccessController,
+        infrastructure::content_access::NopContentAccessConfigurator,
+        usecase::content_access::ContentAccessUseCase,
+    };
 
     use super::AuthorizationConfig;
 
@@ -229,7 +235,12 @@ mod tests {
             jwks_url: Some("https://issuer.example/jwks.json".into()),
         };
         let authority = Authority::new(Jwks::default(), config.validator());
-        let api = Router::new().route("/test", get(|| async { "OK" }));
+        let api = Router::new().route("/test", get(|| async { "OK" })).merge(
+            ContentAccessController::new(ContentAccessUseCase::new(Arc::new(
+                NopContentAccessConfigurator,
+            )))
+            .router(),
+        );
         let app = build_app(
             AuthorizationConfig::protect_with_authority(api, authority),
             Some("https://app.example".parse().unwrap()),
@@ -270,6 +281,20 @@ mod tests {
                 .unwrap()
                 .contains("authorization")
         );
+        for method in ["POST", "DELETE"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri("/api/v0/content-access")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
         let response = app
             .oneshot(
                 Request::builder()

@@ -11,6 +11,7 @@ use crate::{
 };
 
 pub(crate) mod build_metadata_index;
+pub(crate) mod content_access;
 pub(crate) mod import_music;
 
 /// Browses accepted releases through the metadata index.

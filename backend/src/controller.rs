@@ -16,6 +16,7 @@ use crate::{
     usecase::{GetReleaseUseCase, GetTrackUseCase, ListReleasesUseCase},
 };
 
+pub(crate) mod content_access;
 mod domain_type_convert;
 mod error;
 

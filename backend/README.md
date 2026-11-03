@@ -89,6 +89,34 @@ Endpoint-specific scope or role checks are not configured.
 For cross-origin browser requests, also configure `TONHALLE_CORS_ORIGIN`; CORS permits the `Authorization` header.
 Audio delivery uses a separate endpoint, whose access control must be configured independently.
 
+### Content Access
+
+Delivery access defaults to `nop` and is independent of the music-storage implementation.
+`POST /api/v0/content-access` issues delivery credentials and returns their renewal deadline as `invalidAfter`.
+`DELETE /api/v0/content-access` clears the client cookies and returns `204`.
+With `nop`, POST returns `{}` and neither operation sets cookies.
+Both routes use the server's existing Bearer-token policy when authorization is enabled.
+
+| Variable | CLI argument | Commands | Required | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `TONHALLE_CONTENT_ACCESS__MODE` | `--content-access--mode` | `server` | No | `nop` | `nop` or `cloud-front`. |
+| `TONHALLE_CONTENT_ACCESS__CLOUD_FRONT__KEY_PAIR_ID` | `--content-access--cloud-front--key-pair-id` | `server` | For CloudFront | - | Public-key ID trusted by the CloudFront distribution. |
+| `TONHALLE_CONTENT_ACCESS__CLOUD_FRONT__PRIVATE_KEY` | `--content-access--cloud-front--private-key` | `server` | For CloudFront | - | PKCS#8 PEM private key matching the public key. |
+| `TONHALLE_CONTENT_ACCESS__CLOUD_FRONT__RESOURCE_URL` | `--content-access--cloud-front--resource-url` | `server` | For CloudFront | - | Signed resource pattern, such as `https://media.example.com/music/*`. |
+| `TONHALLE_CONTENT_ACCESS__CLOUD_FRONT__VALIDITY_SECONDS` | `--content-access--cloud-front--validity-seconds` | `server` | For CloudFront | - | Positive policy lifetime in seconds. |
+| `TONHALLE_CONTENT_ACCESS__CLOUD_FRONT__COOKIE_DOMAIN` | `--content-access--cloud-front--cookie-domain` | `server` | No | - | Shared parent domain for the API and delivery hosts; omitted cookies are host-only. |
+| `TONHALLE_CONTENT_ACCESS__CLOUD_FRONT__COOKIE_PATH` | `--content-access--cloud-front--cookie-path` | `server` | No | `/` | Cookie path matching the delivery path. |
+
+CloudFront mode sets `CloudFront-Policy`, `CloudFront-Signature`, and `CloudFront-Key-Pair-Id` cookies with `Secure`, `HttpOnly`, and `SameSite=Lax`.
+Clients treat these cookies as opaque and renew access before `invalidAfter`.
+DELETE removes browser cookies; it does not revoke copies of previously issued credentials before policy expiration.
+Credential responses use `Cache-Control: no-store`.
+
+Configure HTTPS and API/delivery hostnames that can share the cookie domain.
+For cross-origin browser calls, configure `TONHALLE_CORS_ORIGIN` and send requests with `credentials: "include"`; the API allows credentialed requests from that exact origin.
+CloudFront trusted keys and delivery-side CORS remain deployment configuration.
+This feature provides the backend endpoints; clients must call them and renew credentials when needed.
+
 ### Music Storage
 
 #### Common

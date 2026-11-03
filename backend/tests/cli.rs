@@ -250,3 +250,52 @@ fn server_authorization_requires_provider_settings_and_allows_cli_disable() {
     assert!(!stderr.contains("authorization.issuer"), "{stderr}");
     assert!(stderr.contains("playback_url_base"), "{stderr}");
 }
+
+#[test]
+fn content_access_cli_selects_provider_and_validates_cloudfront_settings() {
+    let output = run(
+        &["server"],
+        &[("TONHALLE_CONTENT_ACCESS__MODE", "cloud-front")],
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("key_pair_id is required"));
+    let output = run(
+        &[
+            "server",
+            "--content-access--mode",
+            "nop",
+            "--cors-origin",
+            "*",
+        ],
+        &[("TONHALLE_CONTENT_ACCESS__MODE", "cloud-front")],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("CORS origin"), "{stderr}");
+    assert!(!stderr.contains("key_pair_id"));
+    let output = run(
+        &["server", "--content-access--mode", "cloud-front"],
+        &[
+            (
+                "TONHALLE_CONTENT_ACCESS__CLOUD_FRONT__KEY_PAIR_ID",
+                "test-key",
+            ),
+            (
+                "TONHALLE_CONTENT_ACCESS__CLOUD_FRONT__PRIVATE_KEY",
+                "opaque-private-key",
+            ),
+            (
+                "TONHALLE_CONTENT_ACCESS__CLOUD_FRONT__RESOURCE_URL",
+                "https://media.example.com/*",
+            ),
+            (
+                "TONHALLE_CONTENT_ACCESS__CLOUD_FRONT__VALIDITY_SECONDS",
+                "0",
+            ),
+        ],
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("validity_seconds must be greater than zero")
+    );
+}

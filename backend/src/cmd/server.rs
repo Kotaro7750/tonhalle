@@ -18,20 +18,25 @@ use tower_http::{
 use crate::{
     config::{
         authorization::AuthorizationError,
+        content_access::ContentAccessConfigError,
         music_storage::MusicStorageConfigError,
         server::{CorsOriginError, ServerConfig, ServerConfigError},
     },
-    controller::MusicController,
+    controller::{MusicController, content_access::ContentAccessController},
     infrastructure::metadata_index::InMemoryMetadataIndex,
     usecase::{
         GetReleaseUseCase, GetTrackUseCase, ListReleasesUseCase,
         build_metadata_index::{BuildMetadataIndexError, BuildMetadataIndexUseCase},
+        content_access::ContentAccessUseCase,
     },
 };
 
 /// A failure to initialize or run the API server.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ServerError {
+    /// Delivery-access provider cannot be initialized.
+    #[error(transparent)]
+    ContentAccess(#[from] ContentAccessConfigError),
     /// Provider signing keys cannot be loaded.
     #[error(transparent)]
     Authorization(#[from] AuthorizationError),
@@ -77,10 +82,11 @@ pub(crate) async fn run(config: &ServerConfig) -> Result<(), ServerError> {
         GetTrackUseCase::new(index),
     );
 
-    let api = config
-        .authorization()
-        .protect_api(controller.router())
-        .await?;
+    let content_access = ContentAccessController::new(ContentAccessUseCase::new(
+        config.content_access().construct()?,
+    ));
+    let api_router = controller.router().merge(content_access.router());
+    let api = config.authorization().protect_api(api_router).await?;
 
     let app = build_app(api, cors_origin);
 
@@ -112,7 +118,8 @@ pub(crate) fn build_app(api: Router, cors_origin: Option<HeaderValue>) -> Router
         app = app.layer(
             CorsLayer::new()
                 .allow_origin(origin)
-                .allow_methods([Method::GET, Method::HEAD])
+                .allow_methods([Method::GET, Method::HEAD, Method::POST, Method::DELETE])
+                .allow_credentials(true)
                 .allow_headers([AUTHORIZATION, CONTENT_TYPE]),
         );
     }

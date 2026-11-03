@@ -14,11 +14,74 @@ security:
   - {}
   - BearerAuth: []
 tags:
+  - name: ContentAccess
+    description: 配信エンドポイントへのアクセス設定
   - name: "Releases"
     description: "リリースに関連するAPI"
   - name: "Tracks"
     description: "楽曲に関連するAPI"
 paths:
+  /content-access:
+    post:
+      operationId: configureContentAccess
+      tags:
+        - ContentAccess
+      summary: コンテンツアクセスの設定
+      description: |
+        コンテンツ配信エンドポイントへアクセスするために必要な認可情報をクライアントに設定する。
+
+        認可情報が必要な構成では、レスポンスの`Set-Cookie`ヘッダーによって設定する。
+        Cookieの具体的な内容は実装の詳細であり、クライアントは解釈または直接操作してはならない。
+
+        レスポンスに`invalidAfter`が含まれる場合、その時刻以降は設定された認可情報の有効性を保証しない。
+        クライアントは`invalidAfter`より前の任意の時刻に本APIを再度実行し、コンテンツアクセス設定を更新できる。
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "200":
+          description: コンテンツアクセスに必要な設定が完了した
+          headers:
+            Set-Cookie:
+              description: 配信アクセス用Cookie。複数のSet-Cookieヘッダーで返す。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentAccessConfiguration"
+              examples:
+                refreshRequired:
+                  summary: 期限までに更新が必要な設定
+                  value:
+                    invalidAfter: "2026-09-16T12:30:00Z"
+                refreshNotRequired:
+                  summary: 更新が不要な設定
+                  value: {}
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    delete:
+      operationId: clearContentAccess
+      tags:
+        - ContentAccess
+      summary: コンテンツアクセス設定の解除
+      description: |
+        コンテンツ配信エンドポイントへアクセスするために設定された認可情報をクライアントから削除する。
+
+        認可情報が設定される構成では、レスポンスの`Set-Cookie`ヘッダーによって削除する。
+        Cookieの具体的な内容は実装の詳細であり、クライアントは解釈または直接操作してはならない。
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "204":
+          description: コンテンツアクセス設定の解除が完了した
+          headers:
+            Set-Cookie:
+              description: 配信アクセス用Cookieを削除する。
+              schema:
+                type: string
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   "/releases":
     get:
       operationId: "listReleases"
@@ -210,6 +273,16 @@ components:
       schema:
         "$ref": "#/components/schemas/TrackId"
   schemas:
+    ContentAccessConfiguration:
+      type: object
+      description: クライアントに設定されたコンテンツアクセス設定の有効期限
+      additionalProperties: false
+      properties:
+        invalidAfter:
+          type: string
+          format: date-time
+          description: この時刻以降はコンテンツアクセス設定の有効性を保証しない。有効期限がない場合は省略する。
+
     ReleaseId:
       type: "string"
       pattern: "^release-[0-9a-f]{64}$"

@@ -7,6 +7,7 @@ use url::{ParseError as UrlParseError, Url};
 
 use crate::config::{
     authorization::{AuthorizationConfig, AuthorizationError},
+    content_access::{ContentAccessConfig, ContentAccessConfigError},
     music_storage::{MusicStorageConfig, MusicStorageConfigError},
 };
 
@@ -27,6 +28,10 @@ pub(crate) enum CorsOriginError {
 /// Server settings parsed from CLI arguments or the TONHALLE environment namespace.
 #[derive(getset::Getters, Debug, Args)]
 pub(crate) struct ServerConfig {
+    /// Delivery-access provider settings.
+    #[command(flatten)]
+    #[getset(get = "pub(crate)")]
+    content_access: ContentAccessConfig,
     /// Optional OAuth access-token validation settings.
     #[command(flatten)]
     #[getset(get = "pub(crate)")]
@@ -57,6 +62,9 @@ pub(crate) struct ServerConfig {
 /// A failure to validate settings needed by the HTTP server.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ServerConfigError {
+    /// Delivery-access settings are invalid.
+    #[error(transparent)]
+    ContentAccess(#[from] ContentAccessConfigError),
     /// Authorization settings are incomplete.
     #[error(transparent)]
     Authorization(#[from] AuthorizationError),
@@ -75,6 +83,7 @@ impl ServerConfig {
     /// Validates command-specific requirements before initializing server resources.
     pub(crate) fn validate(&self) -> Result<(), ServerConfigError> {
         self.authorization.validate()?;
+        self.content_access.validate()?;
         self.cors_origin()?;
         self.music_storage.validate()?;
         self.music_storage
@@ -155,6 +164,7 @@ mod tests {
             for url in [None, Some("https://example.com/audio")] {
                 let config = ServerConfig {
                     authorization: AuthorizationConfig::default(),
+                    content_access: ContentAccessConfig::default(),
                     listen_address: "127.0.0.1".parse().unwrap(),
                     listen_port: 3000,
                     cors_origin: None,

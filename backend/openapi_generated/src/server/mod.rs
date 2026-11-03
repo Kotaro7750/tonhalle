@@ -24,7 +24,8 @@ use crate::{
 pub fn new<I, A, E, C>(api_impl: I) -> Router
 where
     I: AsRef<A> + Clone + Send + Sync + 'static,
-    A: apis::releases::Releases<E, Claims = C>
+    A: apis::content_access::ContentAccess<E, Claims = C>
+        + apis::releases::Releases<E, Claims = C>
         + apis::tracks::Tracks<E, Claims = C>
         + apis::ApiAuthBasic<Claims = C>
         + Send
@@ -35,6 +36,10 @@ where
 {
     // build our application with a route
     Router::new()
+        .route(
+            "/api/v0/content-access",
+            delete(clear_content_access::<I, A, E, C>).post(configure_content_access::<I, A, E, C>),
+        )
         .route("/api/v0/releases", get(list_releases::<I, A, E, C>))
         .route(
             "/api/v0/releases/{release_id}",
@@ -42,6 +47,283 @@ where
         )
         .route("/api/v0/tracks/{track_id}", get(get_track::<I, A, E, C>))
         .with_state(api_impl)
+}
+
+#[tracing::instrument(skip_all)]
+fn clear_content_access_validation() -> std::result::Result<(), ValidationErrors> {
+    Ok(())
+}
+/// ClearContentAccess - DELETE /api/v0/content-access
+#[tracing::instrument(skip_all)]
+async fn clear_content_access<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    State(api_impl): State<I>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::content_access::ContentAccess<E, Claims = C>
+        + apis::ApiAuthBasic<Claims = C>
+        + Send
+        + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || clear_content_access_validation())
+        .await
+        .unwrap();
+
+    let Ok(()) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl
+        .as_ref()
+        .clear_content_access(&method, &host, &cookies, &claims)
+        .await;
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::content_access::ClearContentAccessResponse::Status401 { www_authenticate } => {
+                let mut response = Response::builder();
+                if let Some(www_authenticate) = www_authenticate {
+                    let www_authenticate = match header::IntoHeaderValue(www_authenticate)
+                        .try_into()
+                    {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                        .body(Body::from(format!("An internal server error occurred handling www_authenticate header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(
+                        HeaderName::from_static("www-authenticate"),
+                        www_authenticate,
+                    );
+                }
+                let mut response = response.status(401);
+                response.body(Body::empty())
+            }
+            apis::content_access::ClearContentAccessResponse::Status204 { set_cookie } => {
+                let mut response = Response::builder();
+                if let Some(set_cookie) = set_cookie {
+                    let set_cookie = match header::IntoHeaderValue(set_cookie).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                        .body(Body::from(format!("An internal server error occurred handling set_cookie header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(HeaderName::from_static("set-cookie"), set_cookie);
+                }
+                let mut response = response.status(204);
+                response.body(Body::empty())
+            }
+            apis::content_access::ClearContentAccessResponse::Status500(body) => {
+                let mut response = Response::builder();
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/problem+json"),
+                    );
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl
+                .as_ref()
+                .handle_error(&method, &host, &cookies, why)
+                .await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[tracing::instrument(skip_all)]
+fn configure_content_access_validation() -> std::result::Result<(), ValidationErrors> {
+    Ok(())
+}
+/// ConfigureContentAccess - POST /api/v0/content-access
+#[tracing::instrument(skip_all)]
+async fn configure_content_access<I, A, E, C>(
+    method: Method,
+    TypedHeader(host): TypedHeader<Host>,
+    cookies: CookieJar,
+    headers: HeaderMap,
+    State(api_impl): State<I>,
+) -> Result<Response, StatusCode>
+where
+    I: AsRef<A> + Send + Sync,
+    A: apis::content_access::ContentAccess<E, Claims = C>
+        + apis::ApiAuthBasic<Claims = C>
+        + Send
+        + Sync,
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    // Authentication
+    let claims_in_auth_header = api_impl
+        .as_ref()
+        .extract_claims_from_auth_header(apis::BasicAuthKind::Bearer, &headers, "authorization")
+        .await;
+    let claims = None.or(claims_in_auth_header);
+    let Some(claims) = claims else {
+        return response_with_status_code_only(StatusCode::UNAUTHORIZED);
+    };
+
+    #[allow(clippy::redundant_closure)]
+    let validation = tokio::task::spawn_blocking(move || configure_content_access_validation())
+        .await
+        .unwrap();
+
+    let Ok(()) = validation else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(validation.unwrap_err().to_string()))
+            .map_err(|_| StatusCode::BAD_REQUEST);
+    };
+
+    let result = api_impl
+        .as_ref()
+        .configure_content_access(&method, &host, &cookies, &claims)
+        .await;
+
+    let resp = match result {
+        Ok(rsp) => match rsp {
+            apis::content_access::ConfigureContentAccessResponse::Status401 {
+                www_authenticate,
+            } => {
+                let mut response = Response::builder();
+                if let Some(www_authenticate) = www_authenticate {
+                    let www_authenticate = match header::IntoHeaderValue(www_authenticate)
+                        .try_into()
+                    {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                        .body(Body::from(format!("An internal server error occurred handling www_authenticate header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(
+                        HeaderName::from_static("www-authenticate"),
+                        www_authenticate,
+                    );
+                }
+                let mut response = response.status(401);
+                response.body(Body::empty())
+            }
+            apis::content_access::ConfigureContentAccessResponse::Status200 {
+                body,
+                set_cookie,
+            } => {
+                let mut response = Response::builder();
+                if let Some(set_cookie) = set_cookie {
+                    let set_cookie = match header::IntoHeaderValue(set_cookie).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                        .body(Body::from(format!("An internal server error occurred handling set_cookie header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(HeaderName::from_static("set-cookie"), set_cookie);
+                }
+                let mut response = response.status(200);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers
+                        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::content_access::ConfigureContentAccessResponse::Status500(body) => {
+                let mut response = Response::builder();
+                let mut response = response.status(500);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/problem+json"),
+                    );
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+        },
+        Err(why) => {
+            // Application code returned an error. This should not happen, as the implementation should
+            // return a valid response.
+            return api_impl
+                .as_ref()
+                .handle_error(&method, &host, &cookies, why)
+                .await;
+        }
+    };
+
+    resp.map_err(|e| {
+        error!(error = ?e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
 }
 
 #[tracing::instrument(skip_all)]
