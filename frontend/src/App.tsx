@@ -10,6 +10,7 @@ import { MiniPlayer } from './player/MiniPlayer'
 import { PlayerOverlay } from './player/PlayerOverlay'
 import { ColorModeSwitch } from './components/ui/color-mode-switch'
 import { Brand } from './components/Brand'
+import { AuthAction } from './auth/AuthAction'
 import { Footer } from './components/Footer'
 
 export function App() {
@@ -34,7 +35,7 @@ export function App() {
         <Container maxW="6xl" px={{ base: '5', md: '8' }} py="5">
           <HStack justify="space-between">
             <Link asChild color="colorPalette.fg" textDecoration="none"><RouterLink to="/"><Brand /></RouterLink></Link>
-            <ColorModeSwitch />
+            <HStack><AuthAction /><ColorModeSwitch /></HStack>
           </HStack>
         </Container>
       </Box>

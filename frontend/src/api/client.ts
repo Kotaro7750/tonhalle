@@ -1,10 +1,22 @@
-import { Configuration, ReleasesApi, TracksApi, ResponseError } from './generated'
+import { Configuration, ContentAccessApi, ReleasesApi, TracksApi, ResponseError } from './generated'
+import { authEnabled, getAccessToken } from '../auth/config'
 
 const configuration = new Configuration({
   basePath: (import.meta.env.VITE_API_BASE_URL || '/api/v0').replace(/\/$/, ''),
+  credentials: 'include',
+  middleware: authEnabled ? [{
+    pre: async ({ url, init }) => {
+      const token = await getAccessToken()
+      if (!token) throw new ApiError('Your session has expired. Please sign in again.', 401)
+      const headers = new Headers(init.headers)
+      headers.set('Authorization', `Bearer ${token}`)
+      return { url, init: { ...init, headers } }
+    },
+  }] : [],
 })
 const releases = new ReleasesApi(configuration)
 const tracks = new TracksApi(configuration)
+const contentAccess = new ContentAccessApi(configuration)
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -13,13 +25,14 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(operation: () => Promise<T>): Promise<T> {
+async function request<T>(operation: () => Promise<T>, fallback = 'Could not load music information.'): Promise<T> {
   try {
     return await operation()
   } catch (error) {
     if (!(error instanceof ResponseError)) throw error
     const response = error.response
-    let message = response.status === 404 ? 'The requested music was not found.' : 'Could not load music information.'
+    let message = response.status === 401 ? 'Your session has expired. Please sign in again.'
+      : response.status === 404 ? 'The requested music was not found.' : fallback
     try {
       const problem: unknown = await response.clone().json()
       if (problem && typeof problem === 'object') {
@@ -32,6 +45,8 @@ async function request<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 export const api = {
+  configureContentAccess: () => request(() => contentAccess.configureContentAccess(), 'Could not configure content access.'),
+  clearContentAccess: () => request(() => contentAccess.clearContentAccess(), 'Could not clear content access.'),
   listReleases: (cursor: string | undefined, signal: AbortSignal) =>
     request(() => releases.listReleases({ cursor, limit: 30 }, { signal })),
   getRelease: (releaseId: string, signal: AbortSignal) =>

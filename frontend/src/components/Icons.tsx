@@ -8,6 +8,7 @@ import {
   LuListCheck,
   LuGripVertical,
   LuListPlus,
+  LuLogOut,
   LuMoon,
   LuListMusic,
   LuRepeat1,
@@ -37,6 +38,7 @@ export const ChevronsUp = themedIcon(LuChevronsUp)
 export const ListCheck = themedIcon(LuListCheck)
 export const GripVertical = themedIcon(LuGripVertical)
 export const ListPlus = themedIcon(LuListPlus)
+export const LogOut = themedIcon(LuLogOut)
 export const Moon = themedIcon(LuMoon)
 export const Pause = themedIcon(IoPauseOutline, IoPause)
 export const Play = themedIcon(IoPlayOutline, IoPlay)

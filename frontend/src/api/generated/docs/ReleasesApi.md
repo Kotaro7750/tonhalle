@@ -28,7 +28,11 @@ import type { GetReleaseRequest } from '';
 
 async function example() {
   console.log("🚀 Testing  SDK...");
-  const api = new ReleasesApi();
+  const config = new Configuration({
+    // Configure HTTP bearer authorization: BearerAuth
+    accessToken: "YOUR BEARER TOKEN",
+  });
+  const api = new ReleasesApi(config);
 
   const body = {
     // string | Releaseの識別子
@@ -60,7 +64,7 @@ example().catch(console.error);
 
 ### Authorization
 
-No authorization required
+[BearerAuth](../README.md#BearerAuth)
 
 ### HTTP request headers
 
@@ -71,6 +75,7 @@ No authorization required
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
+| **401** | 認証有効時、Bearerアクセストークンが未指定または不正である |  * WWW-Authenticate -  <br>  |
 | **200** | リリース詳細の取得に成功した |  -  |
 | **400** | 識別子の形式、カーソル、またはlimitが不正である |  -  |
 | **404** | 指定したリリースまたはトラックが存在しない |  -  |
@@ -85,7 +90,7 @@ No authorization required
 
 リリース一覧の取得
 
-リリース概要をidの昇順でページごとに取得する。 各ページはリクエスト時点の一覧を対象とし、一連の取得を通じたスナップショットは保証しない。 
+リリース概要をidの昇順でページごとに取得する。 各ページはリクエスト時点の一覧を対象とし、一連の取得を通じたスナップショットは保証しない。
 
 ### Example
 
@@ -98,7 +103,11 @@ import type { ListReleasesRequest } from '';
 
 async function example() {
   console.log("🚀 Testing  SDK...");
-  const api = new ReleasesApi();
+  const config = new Configuration({
+    // Configure HTTP bearer authorization: BearerAuth
+    accessToken: "YOUR BEARER TOKEN",
+  });
+  const api = new ReleasesApi(config);
 
   const body = {
     // string | 取得開始位置を指定するカーソル。 初回または先頭から取得し直す場合は省略する。 続きの取得では前のレスポンスのnextCursorをそのまま指定し、内容を解釈してはならない。  (optional)
@@ -133,7 +142,7 @@ example().catch(console.error);
 
 ### Authorization
 
-No authorization required
+[BearerAuth](../README.md#BearerAuth)
 
 ### HTTP request headers
 
@@ -144,6 +153,7 @@ No authorization required
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
+| **401** | 認証有効時、Bearerアクセストークンが未指定または不正である |  * WWW-Authenticate -  <br>  |
 | **200** | リリース一覧の取得に成功した |  -  |
 | **400** | 識別子の形式、カーソル、またはlimitが不正である |  -  |
 | **500** | サーバー内部で予期しないエラーが発生した |  -  |

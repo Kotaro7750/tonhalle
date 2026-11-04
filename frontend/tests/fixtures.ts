@@ -14,7 +14,7 @@ export const track: Track = {
   durationMs: 15000, artistCredits: credits,
   originalAudioFile: {
     id: '2f1c75fc-55de-4d4b-8992-76050f65dff0', mediaType: 'audio/wav',
-    playbackUrl: 'http://127.0.0.1:5173/test-audio.wav',
+    playbackUrl: 'https://127.0.0.1:5173/test-audio.wav',
     sampleRate: 8000, bitDepth: 16, channels: 1, bitrate: 128000,
   },
 }
@@ -63,6 +63,7 @@ export function serveWav(route: Route) {
 export async function mockLibrary(page: Page) {
   await page.route('**/api/v0/**', async (route) => {
     const path = new URL(route.request().url()).pathname
+    if (path === '/api/v0/content-access') return route.fulfill({ json: {} })
     if (path === '/api/v0/releases') return route.fulfill({ json: { items: [summary] } })
     if (path === `/api/v0/releases/${releaseId}`) return route.fulfill({ json: release })
     if (path === `/api/v0/tracks/${trackId}`) return route.fulfill({ json: track })

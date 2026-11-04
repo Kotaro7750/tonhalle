@@ -3,6 +3,7 @@
 export * from './ArtistCredit';
 export * from './AudioFile';
 export * from './BadRequestProblem';
+export * from './ContentAccessConfiguration';
 export * from './InternalServerErrorProblem';
 export * from './NotFoundProblem';
 export * from './Problem';

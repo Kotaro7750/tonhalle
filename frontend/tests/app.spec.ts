@@ -1,6 +1,10 @@
 import { test, expect } from '@playwright/test'
 import { mockLibrary, releaseId, trackId, secondTrackId, summary, release, track } from './fixtures'
 
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/v0/content-access', (route) => route.fulfill({ json: {} }))
+})
+
 for (const mode of ['light', 'dark'] as const) {
   test(`library, detail and direct routes work in ${mode} mode`, async ({ page }, testInfo) => {
     await page.emulateMedia({ colorScheme: mode })

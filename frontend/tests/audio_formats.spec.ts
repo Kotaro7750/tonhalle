@@ -12,7 +12,7 @@ for (const [extension, mediaType, label, bitDepth] of [
 ] as const) {
   test(`plays ${extension} audio and displays its format without inventing bit depth`, async ({ page }) => {
     await mockLibrary(page)
-    const playbackUrl = `http://127.0.0.1:5173/test-audio.${extension}`
+    const playbackUrl = `https://127.0.0.1:5173/test-audio.${extension}`
     await page.route(`**/api/v0/tracks/${trackId}`, (route) => route.fulfill({
       json: { ...track, originalAudioFile: { ...track.originalAudioFile, mediaType, bitDepth, playbackUrl } },
     }))

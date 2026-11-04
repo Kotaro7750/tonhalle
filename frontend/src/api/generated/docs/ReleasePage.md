@@ -1,7 +1,7 @@
 
 # ReleasePage
 
-カーソル方式のリリース一覧。 最終ページのitemsは空配列でもよい。 nextCursorを含む場合、itemsには1件以上含まれる。 
+カーソル方式のリリース一覧。 最終ページのitemsは空配列でもよい。 nextCursorを含む場合、itemsには1件以上含まれる。
 
 ## Properties
 

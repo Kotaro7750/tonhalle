@@ -1,9 +1,12 @@
+apis/ContentAccessApi.ts
 apis/ReleasesApi.ts
 apis/TracksApi.ts
 apis/index.ts
 docs/ArtistCredit.md
 docs/AudioFile.md
 docs/BadRequestProblem.md
+docs/ContentAccessApi.md
+docs/ContentAccessConfiguration.md
 docs/InternalServerErrorProblem.md
 docs/NotFoundProblem.md
 docs/Problem.md
@@ -18,6 +21,7 @@ index.ts
 models/ArtistCredit.ts
 models/AudioFile.ts
 models/BadRequestProblem.ts
+models/ContentAccessConfiguration.ts
 models/InternalServerErrorProblem.ts
 models/NotFoundProblem.ts
 models/Problem.ts

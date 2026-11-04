@@ -27,7 +27,11 @@ import type { GetTrackRequest } from '';
 
 async function example() {
   console.log("🚀 Testing  SDK...");
-  const api = new TracksApi();
+  const config = new Configuration({
+    // Configure HTTP bearer authorization: BearerAuth
+    accessToken: "YOUR BEARER TOKEN",
+  });
+  const api = new TracksApi(config);
 
   const body = {
     // string | Trackの識別子
@@ -59,7 +63,7 @@ example().catch(console.error);
 
 ### Authorization
 
-No authorization required
+[BearerAuth](../README.md#BearerAuth)
 
 ### HTTP request headers
 
@@ -70,6 +74,7 @@ No authorization required
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
+| **401** | 認証有効時、Bearerアクセストークンが未指定または不正である |  * WWW-Authenticate -  <br>  |
 | **200** | トラック詳細の取得に成功した |  -  |
 | **400** | 識別子の形式、カーソル、またはlimitが不正である |  -  |
 | **404** | 指定したリリースまたはトラックが存在しない |  -  |
