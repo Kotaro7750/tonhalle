@@ -40,7 +40,7 @@ export function ReleasesPage() {
                     <Stack gap="1">
                       <Heading as="h2" size="md" fontFamily="body" overflowWrap="anywhere">{release.title}</Heading>
                       <Text textStyle="sm" color="fg.muted" overflowWrap="anywhere">{artistName(release.artistCredits)}</Text>
-                      <Text textStyle="xs" color="fg.muted">{release.releaseDate}</Text>
+                      {release.releaseDate !== null && <Text textStyle="xs" color="fg.muted">{release.releaseDate}</Text>}
                     </Stack>
                   </Card.Body>
                 </RouterLink>

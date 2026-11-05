@@ -388,3 +388,29 @@ test('unknown technical properties do not invent durations or prevent playback',
   await expect.poll(() => page.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime)).toBeGreaterThan(0)
   await expect(page.getByRole('alert')).toHaveCount(0)
 })
+
+for (const date of [null, '2026', '2026-10', '2026-10-13']) {
+  test(`release dates preserve precision and omit missing values: ${date}`, async ({ page }) => {
+    await mockLibrary(page)
+    await page.route('**/api/v0/releases?*', (route) => route.fulfill({ json: { items: [{ ...summary, releaseDate: date }] } }))
+    await page.route(`**/api/v0/releases/${releaseId}`, (route) => route.fulfill({ json: { ...release, releaseDate: date } }))
+    await page.goto('/')
+    const card = page.getByRole('link', { name: /Evening Sessions/ })
+    await expect(card).toBeVisible()
+    if (date === null) {
+      await expect(card.locator('p')).toHaveCount(1)
+    } else {
+      await expect(card.getByText(date, { exact: true })).toBeVisible()
+    }
+    await card.click()
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(release.title)
+    await expect(page.getByText('2 tracks · 0:30', { exact: true })).toBeVisible()
+    if (date === null) {
+      await expect(page.locator('.chakra-badge').filter({ hasText: /^$/ })).toHaveCount(0)
+      await expect(page.getByText('2026-10', { exact: true })).toHaveCount(0)
+    } else {
+      await expect(page.getByText(date, { exact: true })).toBeVisible()
+    }
+    await expect(page.getByRole('button', { name: 'Play First Light', exact: true })).toBeEnabled()
+  })
+}

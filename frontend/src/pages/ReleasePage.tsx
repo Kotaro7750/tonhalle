@@ -51,7 +51,7 @@ export function ReleasePage() {
         </Box>
         <Box gridArea="art" width={{ base: '32', sm: '40', md: '64' }}><RecordArt /></Box>
         <Stack gridArea="metadata" gap="3" minW="0" alignSelf={{ md: 'start' }}>
-          <Stack direction={{ base: 'column', md: 'row' }} align="start" color="fg.muted" gap={{ base: '2', md: '3' }}><Badge>{release.releaseDate}</Badge><Text textStyle="sm">{release.tracks.length} {release.tracks.length === 1 ? 'track' : 'tracks'}{totalDurationMs !== null && ` · ${formatTime(totalDurationMs / 1000)}`}</Text></Stack>
+          <Stack direction={{ base: 'column', md: 'row' }} align="start" color="fg.muted" gap={{ base: '2', md: '3' }}>{release.releaseDate !== null && <Badge>{release.releaseDate}</Badge>}<Text textStyle="sm">{release.tracks.length} {release.tracks.length === 1 ? 'track' : 'tracks'}{totalDurationMs !== null && ` · ${formatTime(totalDurationMs / 1000)}`}</Text></Stack>
           <CollectionActions releaseId={release.id} title={release.title} />
         </Stack>
       </Grid>
