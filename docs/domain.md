@@ -18,7 +18,7 @@
 | --- | --- | --- | --- |
 | id | 文字列 | 必須 | 下記の識別子生成規則に従う |
 | title | 文字列 | 必須 | リリース名 |
-| release_date | 文字列 | 必須 | 有効な日付を表す`YYYY`、`YYYY-MM`、`YYYY-MM-DD`のいずれか。月・日は補完せず、月と日は2桁で表す |
+| release_date | 文字列 | 任意 | 値がある場合は有効な日付を表す`YYYY`、`YYYY-MM`、`YYYY-MM-DD`のいずれか。月・日は補完せず、月と日は2桁で表す |
 
 ### Track
 Release内における個々の楽曲単位のメタデータを保持する。
@@ -109,7 +109,7 @@ ReleaseとTrackは、MBIDの有無にかかわらずメタデータ配列から�
 | エンティティ | 種別 | 識別子生成に使用するMBID | メタデータ配列 |
 | --- | --- | --- | --- |
 | Artist | `artist` | `musicbrainz_albumartistid`と`musicbrainz_artistid`から、それぞれ独立して個々のArtist MBIDを取得する | `[name]` |
-| Release | `release` | 使用しない | `[artistIds, title, releaseDate]` |
+| Release | `release` | 使用しない | `[artistIds, title]` |
 | Track | `track` | 使用しない | `[releaseId, discNumber, trackNumber, title]` |
 
 
@@ -123,7 +123,6 @@ ReleaseとTrackは、MBIDの有無にかかわらずメタデータ配列から�
 | `name` | リリースまたはトラックのクレジットに含まれるアーティスト名。明示的な複数値は各値を個別に取得する。単一の文字列でも、同じクレジットの有効なArtist MBID一覧などから人数が分かる場合は、下記の規則で分割する | 各名前に共通の文字列正規化を適用する |
 | `artistIds` | リリースにクレジットされたArtistの識別子。トラックにクレジットされたArtistの識別子は含めない | クレジットの表示順に並べた配列とする |
 | Releaseの`title` | リリース名 | 共通の文字列正規化を適用する |
-| `releaseDate` | リリース日 | Releaseの`release_date`に定義する形式をそのまま使用する |
 | `releaseId` | 所属するReleaseの識別子 | 取得した識別子をそのまま使用する |
 | `discNumber`、`trackNumber` | ディスク番号、トラック番号 | Trackの属性定義に従う整数を先頭ゼロのない10進数文字列に変換する。`番号/総数`形式は番号のみを使用する |
 | Trackの`title` | トラックタイトル | 共通の文字列正規化を適用する |
@@ -163,5 +162,5 @@ JSONの文字列表現には、次の規則を適用する。
 例えば、Releaseのメタデータに基づくハッシュ入力は次の形式となる。
 
 ```json
-["tonhalle-id-v0","release","metadata",[["artist-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"Example Album","2026"]]
+["tonhalle-id-v0","release","metadata",[["artist-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"Example Album"]]
 ```
