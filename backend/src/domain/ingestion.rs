@@ -80,7 +80,7 @@ pub(crate) fn parse_audio(bytes: &[u8]) -> Result<ParsedAudio, IngestTrackError>
     let raw = metadata::extract_metadata(bytes)?;
     let release_metadata = ReleaseMetadata::new(
         raw.release_title(),
-        raw.release_date(),
+        raw.release_date().as_deref(),
         raw.release_credit().names(),
         raw.release_credit().mbids(),
     )?;
@@ -138,6 +138,28 @@ mod tests {
     }
 
     #[test]
+    fn ingest_track_preserves_identity_and_audio_id_when_release_date_changes_or_is_absent() {
+        let source = sample_metadata();
+        let release_id = release_metadata(&source).unwrap().id().clone();
+        let original = ingest_sample(&source, &release_id).unwrap();
+
+        for date in [None, Some("2026"), Some("2026-10"), Some("2024-02-29")] {
+            let mut changed = source.clone();
+            *changed.release_date_mut() = date.map(str::to_owned);
+            let (track, metadata) = ingest_sample(&changed, &release_id).unwrap();
+            let release =
+                build_release(release_id.clone(), vec![(track.clone(), metadata)]).unwrap();
+
+            assert_eq!(track.id(), original.0.id());
+            assert_eq!(
+                track.original_audio_file().id(),
+                original.0.original_audio_file().id()
+            );
+            assert_eq!(release.release_date().as_deref(), date);
+        }
+    }
+
+    #[test]
     fn ingest_track_rejects_missing_required_values_without_defaults() {
         let source = sample_metadata();
         let release_id = release_metadata(&source).unwrap().id().clone();
@@ -148,7 +170,7 @@ mod tests {
 
             match field {
                 0 => invalid.release_title_mut().clear(),
-                1 => *invalid.release_date_mut() = "2026-02-29".into(),
+                1 => *invalid.release_date_mut() = Some("2026-02-29".into()),
                 2 => invalid.release_credit_mut().names_mut().clear(),
                 3 => *invalid.track_title_mut() = "\t\n".into(),
                 4 => invalid.track_credit_mut().names_mut().clear(),

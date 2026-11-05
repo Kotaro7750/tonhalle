@@ -94,6 +94,20 @@ mod tests {
     use crate::test_support::sample_audio;
 
     #[test]
+    fn import_release_accepts_missing_dates_and_rejects_disagreement() {
+        let dated = sample_metadata();
+        let mut undated = dated.clone();
+        *undated.release_date_mut() = None;
+        let original = ImportRelease::new(vec![sample_audio(&dated)]).unwrap();
+        let missing = ImportRelease::new(vec![sample_audio(&undated)]).unwrap();
+        assert_eq!(original.id(), missing.id());
+        assert!(matches!(
+            ImportRelease::new(vec![sample_audio(&dated), sample_audio(&undated)]),
+            Err(ImportValidationError::MetadataMismatch)
+        ));
+    }
+
+    #[test]
     fn import_release_rejects_duplicates_inconsistent_metadata_and_invalid_sources() {
         let fixture = sample_metadata();
         let original = sample_audio(&fixture);
@@ -116,7 +130,7 @@ mod tests {
             let mut invalid = sample_metadata();
             match field {
                 0 => invalid.track_title_mut().clear(),
-                1 => *invalid.release_date_mut() = "2026-02-30".into(),
+                1 => *invalid.release_date_mut() = Some("2026-02-30".into()),
                 2 => *invalid.disc_number_mut() = "0".into(),
                 _ => invalid.track_credit_mut().names_mut().clear(),
             }

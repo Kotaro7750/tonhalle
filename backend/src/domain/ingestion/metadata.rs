@@ -23,7 +23,7 @@ pub(crate) struct RawMetadata {
     /// Preserves date precision for release validation.
     #[getset(get = "pub(crate)")]
     #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
-    release_date: String,
+    release_date: Option<String>,
     /// Provides the unvalidated release artist names and MBIDs.
     #[getset(get = "pub(crate)")]
     #[cfg_attr(test, getset(get_mut = "pub(crate)"))]
@@ -140,8 +140,7 @@ pub(crate) fn extract_metadata(bytes: &[u8]) -> Result<RawMetadata, ExtractMetad
     Ok(RawMetadata {
         release_title: first(&file, ItemKey::AlbumTitle).unwrap_or_default(),
         release_date: first(&file, ItemKey::ReleaseDate)
-            .or_else(|| first(&file, ItemKey::RecordingDate))
-            .unwrap_or_default(),
+            .or_else(|| first(&file, ItemKey::RecordingDate)),
         release_credit: RawCreditMetadata {
             names: values(&file, ItemKey::AlbumArtist),
             mbids: values(&file, ItemKey::MusicBrainzReleaseArtistId),
@@ -207,7 +206,7 @@ fn first(file: &TaggedFile, key: ItemKey) -> Option<String> {
 pub(crate) fn sample_metadata() -> RawMetadata {
     RawMetadata {
         release_title: "Example Release".into(),
-        release_date: "2026-10-13".into(),
+        release_date: Some("2026-10-13".into()),
         release_credit: RawCreditMetadata {
             names: vec!["Example Artist".into()],
             mbids: vec![],
@@ -241,7 +240,7 @@ mod tests {
         let source = sample_metadata();
         let mut invalid = source.clone();
         invalid.release_title_mut().clear();
-        *invalid.release_date_mut() = "2026-02-29".into();
+        *invalid.release_date_mut() = Some("2026-02-29".into());
         invalid.release_credit_mut().names_mut().clear();
         *invalid.release_credit_mut().mbids_mut() =
             vec!["7b0857ed-11ee-4426-9899-16f4e415322f".into()];
@@ -257,7 +256,7 @@ mod tests {
         let extracted = extract_metadata(&audio).unwrap();
 
         assert!(extracted.release_title().is_empty());
-        assert_eq!(extracted.release_date(), "2026-02-29");
+        assert_eq!(extracted.release_date().as_deref(), Some("2026-02-29"));
         assert!(extracted.release_credit().names().is_empty());
         assert_eq!(
             extracted.release_credit().mbids(),
@@ -355,7 +354,10 @@ mod tests {
             let mut tag = Tag::new(FileType::from_ext(extension).unwrap().primary_tag_type());
             for (key, value) in [
                 (ItemKey::AlbumTitle, fixture.release_title().as_str()),
-                (ItemKey::ReleaseDate, fixture.release_date().as_str()),
+                (
+                    ItemKey::ReleaseDate,
+                    fixture.release_date().as_deref().unwrap(),
+                ),
                 (ItemKey::AlbumArtist, "Example Artist"),
                 (ItemKey::TrackTitle, fixture.track_title().as_str()),
                 (ItemKey::DiscNumber, "1"),

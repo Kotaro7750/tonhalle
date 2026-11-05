@@ -29,7 +29,10 @@ impl From<&Release> for models::ReleaseSummary {
         Self {
             id: value.id().to_string(),
             title: value.title().to_owned(),
-            release_date: value.release_date().to_owned(),
+            release_date: value
+                .release_date()
+                .clone()
+                .map_or(Nullable::Null, Nullable::Present),
             artist_credits: value.artist_credits().iter().map(Into::into).collect(),
         }
     }
@@ -41,7 +44,10 @@ impl From<Release> for models::Release {
         Self {
             id: value.id().to_string(),
             title: value.title().to_owned(),
-            release_date: value.release_date().to_owned(),
+            release_date: value
+                .release_date()
+                .clone()
+                .map_or(Nullable::Null, Nullable::Present),
             artist_credits: value.artist_credits().iter().map(Into::into).collect(),
             tracks: value.tracks().iter().map(Into::into).collect(),
         }
@@ -120,6 +126,20 @@ mod tests {
         },
         test_support::{release_metadata, sample_audio_file, sample_release, sample_track},
     };
+
+    #[test]
+    fn release_conversion_preserves_dates_or_serializes_null_in_details_and_summaries() {
+        for date in [None, Some("2026"), Some("2026-10"), Some("2026-10-13")] {
+            let mut raw = sample_metadata();
+            *raw.release_date_mut() = date.map(str::to_owned);
+            let release = sample_release(&raw);
+            let summary = to_value(models::ReleaseSummary::from(&release)).unwrap();
+            let detail = to_value(models::Release::from(release)).unwrap();
+            let expected = to_value(date).unwrap();
+            assert_eq!(summary.get("releaseDate"), Some(&expected));
+            assert_eq!(detail.get("releaseDate"), Some(&expected));
+        }
+    }
 
     #[test]
     fn track_conversion_serializes_missing_duration_as_null_in_details_and_summaries() {

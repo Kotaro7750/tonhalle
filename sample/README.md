@@ -24,9 +24,9 @@ GitHubが生成するZIP・tarballにも音源の実体を含めたい場合は�
 
 | リリース | アーティスト | トラック数 | 内容 |
 | --- | --- | --- | --- |
-| [Bach: Short Preludes (Tonhalle Sample Album)](./release-ea57599b1f0c33d1d943ff20226ad7d418d79a1436217827aa09812607eaad64/) | Kimiko Ishizaka | 4 | 平均律クラヴィーア曲集第1巻の前奏曲第15番・第23番（各55秒・60秒）。第15番はWAV・AAC・M4Aの形式別サンプルとして収録 |
-| [Bach: Prelude No. 11 (Tonhalle Sample Single)](./release-21fb4363f6c25b9a69da619ace8e12bcb27c9b1047a68de87a3433ed43321ac2/) | Kimiko Ishizaka | 1 | 同曲集の前奏曲第11番を収めた1曲リリース（64秒） |
-| [Vieuxtemps: Caprice 'Yankee Doodle' (Tonhalle Sample Collaboration)](./release-1ac1508956628bfc1927b6fde571efbd604820dbacdeb82ca5d5d58eafe76be7/) | Elias Breeskin、Rudolph Gruen | 1 | ヴァイオリンとピアノの共演を収めた1曲リリース |
+| [Bach: Short Preludes (Tonhalle Sample Album)](./release-68a59e204b7ccc8def251db7c82642436d71041d9d34182f776a84401ead0a72/) | Kimiko Ishizaka | 4 | 平均律クラヴィーア曲集第1巻の前奏曲第15番・第23番（各55秒・60秒）。第15番はWAV・AAC・M4Aの形式別サンプルとして収録 |
+| [Bach: Prelude No. 11 (Tonhalle Sample Single)](./release-e4ccdfd8a1e469766d6cb327f0df5329815bec53cacf00572b6d28dd0262d924/) | Kimiko Ishizaka | 1 | 同曲集の前奏曲第11番を収めた1曲リリース（64秒） |
+| [Vieuxtemps: Caprice 'Yankee Doodle' (Tonhalle Sample Collaboration)](./release-2c1bb1cd9fcd50dd123abf124fefd09c111b08bb4b8453a4c232073cdbfda16e/) | Elias Breeskin、Rudolph Gruen | 1 | ヴァイオリンとピアノの共演を収めた1曲リリース |
 
 # 出典と権利表示
 

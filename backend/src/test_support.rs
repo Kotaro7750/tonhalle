@@ -16,7 +16,7 @@ pub(crate) fn release_metadata(
 ) -> Result<ReleaseMetadata, ReleaseMetadataValidationError> {
     ReleaseMetadata::new(
         raw.release_title(),
-        raw.release_date(),
+        raw.release_date().as_deref(),
         raw.release_credit().names(),
         raw.release_credit().mbids(),
     )
@@ -81,7 +81,7 @@ pub(crate) fn sample_audio_with_mbids(
 
     for (key, value) in [
         (ItemKey::AlbumTitle, Some(source.release_title().as_str())),
-        (ItemKey::ReleaseDate, Some(source.release_date().as_str())),
+        (ItemKey::ReleaseDate, source.release_date().as_deref()),
         (ItemKey::MusicBrainzReleaseId, release_mbid),
         (ItemKey::TrackTitle, Some(source.track_title().as_str())),
         (ItemKey::MusicBrainzRecordingId, recording_mbid),

@@ -32,7 +32,7 @@ pub(crate) struct ReleaseMetadata {
     #[getset(get = "pub(crate)")]
     id: ReleaseId,
     title: String,
-    release_date: String,
+    release_date: Option<String>,
     artist_credits: Vec<ArtistCredit>,
 }
 
@@ -40,13 +40,15 @@ impl ReleaseMetadata {
     /// Validates release fields and derives their metadata-based identity.
     pub(crate) fn new(
         title: &str,
-        release_date: &str,
+        release_date: Option<&str>,
         artist_names: &[String],
         artist_mbids: &[String],
     ) -> Result<Self, ReleaseMetadataValidationError> {
         let normalized_title =
             normalization::required(title).ok_or(ReleaseMetadataValidationError::MissingTitle)?;
-        validate_release_date(release_date)?;
+        if let Some(date) = release_date {
+            validate_release_date(date)?;
+        }
 
         let artist_credits = artist_credits(artist_names, artist_mbids)?;
         let artist_ids = artist_credits
@@ -54,12 +56,12 @@ impl ReleaseMetadata {
             .map(|credit| credit.artist_id())
             .collect::<Vec<_>>();
 
-        let id = ReleaseId::from_metadata(json!([artist_ids, normalized_title, release_date]));
+        let id = ReleaseId::from_metadata(json!([artist_ids, normalized_title]));
 
         Ok(Self {
             id,
             title: title.to_owned(),
-            release_date: release_date.to_owned(),
+            release_date: release_date.map(str::to_owned),
             artist_credits,
         })
     }
@@ -115,7 +117,7 @@ pub(crate) struct Release {
     title: String,
     /// Preserves the accepted release date precision.
     #[getset(get = "pub(crate)")]
-    release_date: String,
+    release_date: Option<String>,
     /// Exposes release credits in display order.
     #[getset(get = "pub(crate)")]
     artist_credits: Vec<ArtistCredit>,
@@ -313,12 +315,14 @@ mod tests {
         let id = release_metadata(&source).unwrap().id().clone();
         let original = sample_track(&sample_metadata(), &id, sample_audio_file());
 
-        for field in ["title", "credits"] {
+        for field in ["title", "credits", "date", "missing_date"] {
             let mut changed = sample_metadata();
 
             match field {
                 "title" => changed.release_title_mut().push(' '),
-                _ => changed.release_credit_mut().names_mut()[0].push(' '),
+                "credits" => changed.release_credit_mut().names_mut()[0].push(' '),
+                "date" => *changed.release_date_mut() = Some("2026".into()),
+                _ => *changed.release_date_mut() = None,
             }
 
             let duplicate = sample_track(&changed, &id, sample_audio_file());
@@ -411,17 +415,17 @@ mod tests {
     #[test]
     fn release_metadata_new_rejects_missing_titles_and_artist_credits() {
         assert!(matches!(
-            ReleaseMetadata::new(" \t", "2026", &["Artist".into()], &[]),
+            ReleaseMetadata::new(" \t", Some("2026"), &["Artist".into()], &[]),
             Err(ReleaseMetadataValidationError::MissingTitle)
         ));
         assert!(matches!(
-            ReleaseMetadata::new("Release", "2026", &[], &[]),
+            ReleaseMetadata::new("Release", Some("2026"), &[], &[]),
             Err(ReleaseMetadataValidationError::ArtistCredits(
                 ArtistCreditValidationError::NameMbidMismatch
             ))
         ));
         assert!(matches!(
-            ReleaseMetadata::new("Release", "2026", &[" \t".into()], &[]),
+            ReleaseMetadata::new("Release", Some("2026"), &[" \t".into()], &[]),
             Err(ReleaseMetadataValidationError::ArtistCredits(
                 ArtistCreditValidationError::MissingName
             ))

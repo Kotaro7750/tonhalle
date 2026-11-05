@@ -1816,13 +1816,12 @@ pub struct Release {
     #[validate(length(min = 1), custom(function = "check_xss_string"))]
     pub title: String,
 
-    /// リリース日
+    /// リリース日。取得できない場合はnull。 値がある場合は有効な日付を表すYYYY、YYYY-MM、YYYY-MM-DDのいずれか。 月・日は補完せず、月と日は2桁で表す。
     #[serde(rename = "releaseDate")]
     #[validate(
             regex(path = *RE_RELEASE_RELEASE_DATE),
-          custom(function = "check_xss_string"),
     )]
-    pub release_date: String,
+    pub release_date: Nullable<String>,
 
     /// 表示順に並べたアーティストクレジット
     #[serde(rename = "artistCredits")]
@@ -1847,7 +1846,7 @@ impl Release {
     pub fn new(
         id: String,
         title: String,
-        release_date: String,
+        release_date: Nullable<String>,
         artist_credits: Vec<models::ArtistCredit>,
         tracks: Vec<models::TrackSummary>,
     ) -> Release {
@@ -1872,7 +1871,11 @@ impl std::fmt::Display for Release {
             Some("title".to_string()),
             Some(self.title.to_string()),
             Some("releaseDate".to_string()),
-            Some(self.release_date.to_string()),
+            Some(
+                self.release_date
+                    .as_ref()
+                    .map_or("null".to_string(), |x| x.to_string()),
+            ),
             // Skipping artistCredits in query parameter serialization
 
             // Skipping tracks in query parameter serialization
@@ -1931,10 +1934,12 @@ impl std::str::FromStr for Release {
                     "title" => intermediate_rep.title.push(
                         <String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?,
                     ),
-                    #[allow(clippy::redundant_clone)]
-                    "releaseDate" => intermediate_rep.release_date.push(
-                        <String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?,
-                    ),
+                    "releaseDate" => {
+                        return std::result::Result::Err(
+                            "Parsing a nullable type in this style is not supported in Release"
+                                .to_string(),
+                        );
+                    }
                     "artistCredits" => {
                         return std::result::Result::Err(
                             "Parsing a container in this style is not supported in Release"
@@ -1971,11 +1976,9 @@ impl std::str::FromStr for Release {
                 .into_iter()
                 .next()
                 .ok_or_else(|| "title missing in Release".to_string())?,
-            release_date: intermediate_rep
-                .release_date
-                .into_iter()
-                .next()
-                .ok_or_else(|| "releaseDate missing in Release".to_string())?,
+            release_date: std::result::Result::Err(
+                "Nullable types not supported in Release".to_string(),
+            )?,
             artist_credits: intermediate_rep
                 .artist_credits
                 .into_iter()
@@ -2032,7 +2035,7 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<Release> {
     }
 }
 
-/// リリース日
+/// リリース日。取得できない場合はnull。 値がある場合は有効な日付を表すYYYY、YYYY-MM、YYYY-MM-DDのいずれか。 月・日は補完せず、月と日は2桁で表す。
 #[derive(Debug, Clone, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct ReleaseDate(pub String);
@@ -2302,13 +2305,12 @@ pub struct ReleaseSummary {
     #[validate(length(min = 1), custom(function = "check_xss_string"))]
     pub title: String,
 
-    /// リリース日
+    /// リリース日。取得できない場合はnull。 値がある場合は有効な日付を表すYYYY、YYYY-MM、YYYY-MM-DDのいずれか。 月・日は補完せず、月と日は2桁で表す。
     #[serde(rename = "releaseDate")]
     #[validate(
             regex(path = *RE_RELEASESUMMARY_RELEASE_DATE),
-          custom(function = "check_xss_string"),
     )]
-    pub release_date: String,
+    pub release_date: Nullable<String>,
 
     /// 表示順に並べたアーティストクレジット
     #[serde(rename = "artistCredits")]
@@ -2328,7 +2330,7 @@ impl ReleaseSummary {
     pub fn new(
         id: String,
         title: String,
-        release_date: String,
+        release_date: Nullable<String>,
         artist_credits: Vec<models::ArtistCredit>,
     ) -> ReleaseSummary {
         ReleaseSummary {
@@ -2351,7 +2353,11 @@ impl std::fmt::Display for ReleaseSummary {
             Some("title".to_string()),
             Some(self.title.to_string()),
             Some("releaseDate".to_string()),
-            Some(self.release_date.to_string()),
+            Some(
+                self.release_date
+                    .as_ref()
+                    .map_or("null".to_string(), |x| x.to_string()),
+            ),
             // Skipping artistCredits in query parameter serialization
         ];
 
@@ -2407,9 +2413,9 @@ impl std::str::FromStr for ReleaseSummary {
                     "title" => intermediate_rep.title.push(
                         <String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?,
                     ),
-                    #[allow(clippy::redundant_clone)]
-                    "releaseDate" => intermediate_rep.release_date.push(
-                        <String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?,
+                    "releaseDate" => return std::result::Result::Err(
+                        "Parsing a nullable type in this style is not supported in ReleaseSummary"
+                            .to_string(),
                     ),
                     "artistCredits" => {
                         return std::result::Result::Err(
@@ -2441,11 +2447,9 @@ impl std::str::FromStr for ReleaseSummary {
                 .into_iter()
                 .next()
                 .ok_or_else(|| "title missing in ReleaseSummary".to_string())?,
-            release_date: intermediate_rep
-                .release_date
-                .into_iter()
-                .next()
-                .ok_or_else(|| "releaseDate missing in ReleaseSummary".to_string())?,
+            release_date: std::result::Result::Err(
+                "Nullable types not supported in ReleaseSummary".to_string(),
+            )?,
             artist_credits: intermediate_rep
                 .artist_credits
                 .into_iter()

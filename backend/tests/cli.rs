@@ -101,7 +101,7 @@ fn import_cli_continues_after_invalid_release_and_reports_nonzero_status() {
     write(source.path().join("a-invalid/audio.wav"), b"invalid").unwrap();
     create_dir(source.path().join("b-valid")).unwrap();
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../sample/release-1ac1508956628bfc1927b6fde571efbd604820dbacdeb82ca5d5d58eafe76be7/f8c2a61f-a7ec-4fdb-b154-44f38aa0d7c7.mp3");
+        .join("../sample/release-2c1bb1cd9fcd50dd123abf124fefd09c111b08bb4b8453a4c232073cdbfda16e/f8c2a61f-a7ec-4fdb-b154-44f38aa0d7c7.mp3");
     copy(fixture, source.path().join("b-valid/track.mp3")).unwrap();
     let env = [
         (
