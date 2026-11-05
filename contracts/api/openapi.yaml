@@ -1,7 +1,7 @@
 openapi: "3.1.0"
 info:
   title: "Tonhalle API"
-  version: "0.2.0"
+  version: "0.3.0"
   license:
     name: "MIT"
     identifier: "MIT"
@@ -313,9 +313,12 @@ components:
       minLength: 1
       description: "アーティスト名"
     ReleaseDate:
-      type: "string"
+      type: ["string", "null"]
       pattern: "^[0-9]{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12][0-9]|3[01]))?)?$"
-      description: "リリース日"
+      description: |
+        リリース日。取得できない場合はnull。
+        値がある場合は有効な日付を表すYYYY、YYYY-MM、YYYY-MM-DDのいずれか。
+        月・日は補完せず、月と日は2桁で表す。
     DiscNumber:
       type: "integer"
       minimum: 1
