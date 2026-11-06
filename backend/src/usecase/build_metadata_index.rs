@@ -77,6 +77,7 @@ mod tests {
         async fn save_release(
             &self,
             _: &ImportRelease,
+            _: bool,
         ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
             panic!("index construction must not write music storage")
         }
@@ -101,6 +102,7 @@ mod tests {
         async fn save_release(
             &self,
             _: &ImportRelease,
+            _: bool,
         ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
             panic!("index construction must not write music storage")
         }

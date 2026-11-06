@@ -97,15 +97,9 @@ impl S3MusicStorage {
         }
     }
 
-    /// Saves audio directly after checking for existing objects in the release.
-    ///
-    /// This is best effort: concurrent writes are not serialized, and failed saves may leave a partial release that later imports skip.
-    async fn save(
-        &self,
-        release: &ImportRelease,
-    ) -> Result<SaveReleaseOutcome, S3SaveReleaseError> {
-        // Retain any existing release, including partial audio left by a previous failed save.
-        let prefix = self.key(&format!("{}/", release.id()));
+    /// Checks for any existing release objects without uploading content.
+    async fn check_destination(&self, id: &ReleaseId) -> Result<bool, S3SaveReleaseError> {
+        let prefix = self.key(&format!("{}/", id));
         let existing = self
             .client
             .list_objects_v2()
@@ -115,9 +109,24 @@ impl S3MusicStorage {
             .send()
             .await
             .map_err(|source| S3SaveReleaseError::List(Box::new(source)))?;
-        if !existing.contents().is_empty() {
+        Ok(!existing.contents().is_empty())
+    }
+
+    /// Saves audio directly after checking for existing objects in the release.
+    ///
+    /// This is best effort: concurrent writes are not serialized, and failed saves may leave a partial release that later imports skip.
+    async fn save(
+        &self,
+        release: &ImportRelease,
+        dry_run: bool,
+    ) -> Result<SaveReleaseOutcome, S3SaveReleaseError> {
+        if self.check_destination(release.id()).await? {
             return Ok(SaveReleaseOutcome::AlreadyExists);
         }
+        if dry_run {
+            return Ok(SaveReleaseOutcome::Saved);
+        }
+        let prefix = self.key(&format!("{}/", release.id()));
 
         // Upload each original independently with a new audio identity and its delivery content type.
         for audio in release.audio() {
@@ -237,8 +246,9 @@ impl MusicStorage for S3MusicStorage {
     async fn save_release(
         &self,
         release: &ImportRelease,
+        dry_run: bool,
     ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
-        self.save(release)
+        self.save(release, dry_run)
             .await
             .map_err(|source| SaveReleaseError::Internal {
                 id: release.id().clone(),
@@ -384,7 +394,7 @@ mod tests {
             let bytes = vec![sample_audio(&sample_metadata()), sample_audio(&second)];
             let release = ImportRelease::new(bytes.clone()).unwrap();
             assert_eq!(
-                storage.save_release(&release).await.unwrap(),
+                storage.save_release(&release, false).await.unwrap(),
                 SaveReleaseOutcome::Saved
             );
             let snapshot = objects.lock().unwrap().clone();
@@ -401,7 +411,7 @@ mod tests {
                 assert!(bytes.contains(value));
             }
             assert_eq!(
-                storage.save_release(&release).await.unwrap(),
+                storage.save_release(&release, false).await.unwrap(),
                 SaveReleaseOutcome::AlreadyExists
             );
             assert_eq!(*objects.lock().unwrap(), snapshot);
@@ -463,7 +473,7 @@ mod tests {
             sample_audio(&second),
         ])
         .unwrap();
-        assert!(storage.save_release(&release).await.is_err());
+        assert!(storage.save_release(&release, false).await.is_err());
         assert_eq!(objects.lock().unwrap().len(), 1);
         let scanned = storage
             .scan_releases()
@@ -474,7 +484,7 @@ mod tests {
             .unwrap();
         assert_eq!(scanned.tracks().len(), 1);
         assert_eq!(
-            storage.save_release(&release).await.unwrap(),
+            storage.save_release(&release, false).await.unwrap(),
             SaveReleaseOutcome::AlreadyExists
         );
 

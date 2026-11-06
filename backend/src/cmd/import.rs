@@ -7,7 +7,9 @@ pub(crate) async fn run(config: &ImportConfig) -> anyhow::Result<()> {
     config.validate()?;
     let source = config.source().construct_import_source()?;
     let storage = config.storage().construct_music_storage().await?;
-    let summary = ImportMusicUseCase::new(source, storage).execute().await?;
+    let summary = ImportMusicUseCase::new(source, storage)
+        .execute(*config.dry_run())
+        .await?;
     println!(
         "saved: {}, skipped: {}, failed: {}",
         summary.saved(),

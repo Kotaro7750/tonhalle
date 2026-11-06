@@ -227,34 +227,54 @@ impl FileSystemMusicStorage {
             .map_err(|source| ReleaseScanFailure::InvalidRelease { id, source })
     }
 
+    /// Checks existing release and staging objects without modifying storage.
+    fn check_destination(&self, id: &ReleaseId) -> Result<bool, FileSystemSaveReleaseError> {
+        match symlink_metadata(self.root_path.join(id.as_ref())) {
+            Ok(metadata) if metadata.is_dir() => {
+                return Ok(true);
+            }
+            Ok(_) => return Err(FileSystemSaveReleaseError::ConflictingDestination),
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        match symlink_metadata(self.root_path.join(STAGING_DIRECTORY)) {
+            Ok(metadata) if !metadata.is_dir() || metadata.file_type().is_symlink() => {
+                return Err(FileSystemSaveReleaseError::InvalidStagingDirectory);
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        Ok(false)
+    }
+
     /// Writes original bytes and UUID filenames before exposing a complete release.
     fn persist_release(
         &self,
         release: &ImportRelease,
+        dry_run: bool,
     ) -> Result<SaveReleaseOutcome, FileSystemSaveReleaseError> {
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(self.root_path.join(".tonhalle-import.lock"))?;
-        lock.lock()?;
-
-        let destination = self.root_path.join(release.id().as_ref());
-        match symlink_metadata(&destination) {
-            Ok(metadata) if metadata.is_dir() => return Ok(SaveReleaseOutcome::AlreadyExists),
-            Ok(_) => {
-                return Err(FileSystemSaveReleaseError::ConflictingDestination);
-            }
-            Err(error) if error.kind() == ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
+        let _lock = if dry_run {
+            None
+        } else {
+            let lock = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(self.root_path.join(".tonhalle-import.lock"))?;
+            lock.lock()?;
+            Some(lock)
+        };
+        if self.check_destination(release.id())? {
+            return Ok(SaveReleaseOutcome::AlreadyExists);
         }
-
+        if dry_run {
+            return Ok(SaveReleaseOutcome::Saved);
+        }
+        let destination = self.root_path.join(release.id().as_ref());
         let staging_root = self.root_path.join(STAGING_DIRECTORY);
         create_dir_all(&staging_root)?;
-        if symlink_metadata(&staging_root)?.file_type().is_symlink() {
-            return Err(FileSystemSaveReleaseError::InvalidStagingDirectory);
-        }
         let staging = tempfile::tempdir_in(staging_root)?;
         for audio in release.audio() {
             let extension = audio.properties().media_type().extension();
@@ -278,17 +298,23 @@ impl FileSystemMusicStorage {
     fn save_release_blocking(
         &self,
         release: &ImportRelease,
+        dry_run: bool,
     ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
-        self.persist_release(release)
-            .map_err(|source| match source {
-                FileSystemSaveReleaseError::ConflictingDestination => SaveReleaseError::Conflict {
-                    id: release.id().clone(),
-                },
-                source => SaveReleaseError::Internal {
-                    id: release.id().clone(),
-                    source: Box::new(source),
-                },
-            })
+        self.persist_release(release, dry_run)
+            .map_err(|source| Self::save_error(release.id(), source))
+    }
+
+    /// Preserves destination conflicts and underlying filesystem errors.
+    fn save_error(id: &ReleaseId, source: FileSystemSaveReleaseError) -> SaveReleaseError {
+        match source {
+            FileSystemSaveReleaseError::ConflictingDestination => {
+                SaveReleaseError::Conflict { id: id.clone() }
+            }
+            source => SaveReleaseError::Internal {
+                id: id.clone(),
+                source: Box::new(source),
+            },
+        }
     }
 
     /// Groups audio paths by their stored release directory and constructs domain releases.
@@ -362,11 +388,12 @@ impl MusicStorage for FileSystemMusicStorage {
     async fn save_release(
         &self,
         release: &ImportRelease,
+        dry_run: bool,
     ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
         let storage = self.clone();
         let release = release.clone();
         let id = release.id().clone();
-        spawn_blocking(move || storage.save_release_blocking(&release))
+        spawn_blocking(move || storage.save_release_blocking(&release, dry_run))
             .await
             .map_err(|source| SaveReleaseError::Internal {
                 id,
@@ -456,7 +483,7 @@ mod tests {
         let storage = FileSystemMusicStorage::for_import(root.path().to_path_buf()).unwrap();
         let destination = root.path().join(release.id().as_ref());
         write(&destination, b"existing object").unwrap();
-        assert!(matches!(storage.save_release(&release).await,
+        assert!(matches!(storage.save_release(&release, false).await,
             Err(SaveReleaseError::Conflict { id }) if &id == release.id()));
         assert_eq!(read(destination).unwrap(), b"existing object");
 
@@ -464,7 +491,7 @@ mod tests {
         std::fs::create_dir(&missing).unwrap();
         let storage = FileSystemMusicStorage::for_import(missing.clone()).unwrap();
         std::fs::remove_dir(missing).unwrap();
-        let error = storage.save_release(&release).await.unwrap_err();
+        let error = storage.save_release(&release, false).await.unwrap_err();
         assert!(matches!(&error, SaveReleaseError::Internal { id, .. } if id == release.id()));
         let io = error
             .source()
@@ -729,7 +756,7 @@ mod tests {
         let bytes = vec![sample_audio(&sample_metadata()), sample_audio(&second)];
         let release = ImportRelease::new(bytes.clone()).unwrap();
         assert_eq!(
-            storage.save_release(&release).await.unwrap(),
+            storage.save_release(&release, false).await.unwrap(),
             SaveReleaseOutcome::Saved
         );
         let directory = root.path().join(release.id().as_ref());
@@ -754,7 +781,7 @@ mod tests {
         }
         let reopened = FileSystemMusicStorage::for_import(root.path().to_owned()).unwrap();
         assert_eq!(
-            reopened.save_release(&release).await.unwrap(),
+            reopened.save_release(&release, false).await.unwrap(),
             SaveReleaseOutcome::AlreadyExists
         );
         assert_eq!(snapshot(), original);
@@ -773,7 +800,7 @@ mod tests {
             .map(|_| {
                 let storage = storage.clone();
                 let release = release.clone();
-                tokio::spawn(async move { storage.save_release(&release).await.unwrap() })
+                tokio::spawn(async move { storage.save_release(&release, false).await.unwrap() })
             })
             .collect();
         let mut results = Vec::new();

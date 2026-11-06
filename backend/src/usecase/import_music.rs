@@ -1,10 +1,13 @@
 //! Imports independent release candidates without accessing the metadata index.
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use tokio::task::{JoinError, spawn_blocking};
 
 use crate::{
-    domain::import::{ImportRelease, ImportValidationError},
+    domain::{
+        id::ReleaseId,
+        import::{ImportRelease, ImportValidationError},
+    },
     port::{
         import_source::{ImportSource, ListImportReleasesError, ReadImportAudioError},
         music_storage::{MusicStorage, SaveReleaseError, SaveReleaseOutcome},
@@ -25,6 +28,9 @@ pub(crate) enum ImportMusicError {
 /// A candidate failure reported while other releases continue importing.
 #[derive(Debug, thiserror::Error)]
 enum ImportCandidateError {
+    /// Another candidate in this execution already claimed the release identity.
+    #[error("duplicate release candidate: {0}")]
+    DuplicateRelease(ReleaseId),
     /// The source reading and validation worker failed.
     #[error(transparent)]
     Worker(#[from] JoinError),
@@ -42,7 +48,7 @@ enum ImportCandidateError {
 /// Counts all candidate outcomes after a complete source enumeration.
 #[derive(Debug, Default, getset::CopyGetters)]
 pub(crate) struct ImportSummary {
-    /// Number of releases successfully published.
+    /// Number of releases saved or treated as saved in a dry run.
     #[getset(get_copy = "pub(crate)")]
     saved: usize,
     /// Number of already existing releases retained.
@@ -66,10 +72,11 @@ impl ImportMusicUseCase {
     }
 
     /// Continues after each candidate failure and reports fatal enumeration failures.
-    pub(crate) async fn execute(&self) -> Result<ImportSummary, ImportMusicError> {
+    pub(crate) async fn execute(&self, dry_run: bool) -> Result<ImportSummary, ImportMusicError> {
         let source = self.source.clone();
         let candidates = spawn_blocking(move || source.list_releases()).await??;
         let mut summary = ImportSummary::default();
+        let mut planned = HashSet::new();
         for candidate in candidates {
             let key = candidate.key().clone();
             let source = self.source.clone();
@@ -83,7 +90,14 @@ impl ImportMusicUseCase {
                     Ok::<_, ImportCandidateError>(ImportRelease::new(bytes)?)
                 })
                 .await??;
-                Ok::<_, ImportCandidateError>(self.storage.save_release(&release).await?)
+                if planned.contains(release.id()) {
+                    return Err(ImportCandidateError::DuplicateRelease(release.id().clone()));
+                }
+                let outcome = self.storage.save_release(&release, dry_run).await?;
+                if outcome == SaveReleaseOutcome::Saved {
+                    planned.insert(release.id().clone());
+                }
+                Ok(outcome)
             }
             .await;
             match result {
@@ -157,6 +171,7 @@ mod tests {
         async fn save_release(
             &self,
             release: &ImportRelease,
+            _dry_run: bool,
         ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
             self.saved.lock().unwrap().push(
                 release
@@ -206,7 +221,7 @@ mod tests {
             saved: Mutex::new(vec![]),
         });
         let result = ImportMusicUseCase::new(source, storage.clone())
-            .execute()
+            .execute(false)
             .await
             .unwrap();
         assert_eq!(
@@ -230,7 +245,7 @@ mod tests {
         });
         assert!(matches!(
             ImportMusicUseCase::new(source, storage.clone())
-                .execute()
+                .execute(false)
                 .await,
             Err(ImportMusicError::ListReleases(_))
         ));
@@ -249,7 +264,7 @@ mod tests {
             saved: Mutex::new(vec![]),
         });
         let result = ImportMusicUseCase::new(source, storage.clone())
-            .execute()
+            .execute(false)
             .await
             .unwrap();
         assert_eq!(

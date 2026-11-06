@@ -94,10 +94,13 @@ pub(crate) enum ReleaseScanFailure {
 pub(crate) trait MusicStorage: Send + Sync {
     /// Saves a release, skipping identities already present in storage.
     ///
+    /// Dry runs perform read-only checks and report success without writing.
+    /// Write permissions and available capacity are only verified by actual writes.
     /// Atomicity depends on the adapter; best-effort storage may expose partial writes on failure.
     async fn save_release(
         &self,
         release: &ImportRelease,
+        dry_run: bool,
     ) -> Result<SaveReleaseOutcome, SaveReleaseError>;
 
     /// Returns individual successes and failures separately from incomplete enumeration.

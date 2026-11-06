@@ -17,6 +17,10 @@ use crate::config::{
 /// Settings for independently configured import source and destination storage.
 #[derive(getset::Getters, Debug, Args)]
 pub(crate) struct ImportConfig {
+    /// Checks import candidates and destinations without writing any files or objects.
+    #[arg(long)]
+    #[getset(get = "pub(crate)")]
+    dry_run: bool,
     /// Read-only source storage settings.
     #[command(flatten)]
     #[getset(get = "pub(crate)")]
