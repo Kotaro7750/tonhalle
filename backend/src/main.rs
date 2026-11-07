@@ -2,7 +2,9 @@
 
 use clap::Parser;
 
-use crate::cmd::{import::run as run_import, server::run as run_server};
+use crate::cmd::{
+    import::run as run_import, import_check::run as run_import_check, server::run as run_server,
+};
 
 mod cmd;
 mod config;
@@ -22,6 +24,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.command() {
         cmd::Command::Server(config) => run_server(config).await?,
         cmd::Command::Import(config) => run_import(config).await?,
+        cmd::Command::ImportCheck(config) => run_import_check(config).await?,
     }
     Ok(())
 }

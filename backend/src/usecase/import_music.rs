@@ -10,7 +10,7 @@ use crate::{
     },
     port::{
         import_source::{ImportSource, ListImportReleasesError, ReadImportAudioError},
-        music_storage::{MusicStorage, SaveReleaseError, SaveReleaseOutcome},
+        music_storage::{MusicStorage, SaveReleaseOutcome},
     },
 };
 
@@ -40,9 +40,6 @@ enum ImportCandidateError {
     /// Source metadata violates the import constraints.
     #[error(transparent)]
     Validation(#[from] ImportValidationError),
-    /// The validated release could not be saved.
-    #[error(transparent)]
-    Save(#[from] SaveReleaseError),
 }
 
 /// Counts all candidate outcomes after a complete source enumeration.
@@ -73,33 +70,15 @@ impl ImportMusicUseCase {
 
     /// Continues after each candidate failure and reports fatal enumeration failures.
     pub(crate) async fn execute(&self, dry_run: bool) -> Result<ImportSummary, ImportMusicError> {
-        let source = self.source.clone();
-        let candidates = spawn_blocking(move || source.list_releases()).await??;
-        let mut summary = ImportSummary::default();
-        let mut planned = HashSet::new();
-        for candidate in candidates {
-            let key = candidate.key().clone();
-            let source = self.source.clone();
-            let result = async {
-                let release = spawn_blocking(move || {
-                    let bytes = candidate
-                        .audio_keys()
-                        .iter()
-                        .map(|key| source.read_audio(key))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    Ok::<_, ImportCandidateError>(ImportRelease::new(bytes)?)
-                })
-                .await??;
-                if planned.contains(release.id()) {
-                    return Err(ImportCandidateError::DuplicateRelease(release.id().clone()));
-                }
-                let outcome = self.storage.save_release(&release, dry_run).await?;
-                if outcome == SaveReleaseOutcome::Saved {
-                    planned.insert(release.id().clone());
-                }
-                Ok(outcome)
-            }
-            .await;
+        let checked = ImportCheckUseCase::new(self.source.clone())
+            .execute()
+            .await?;
+        let mut summary = ImportSummary {
+            failed: checked.failed,
+            ..ImportSummary::default()
+        };
+        for (key, release) in checked.releases {
+            let result = self.storage.save_release(&release, dry_run).await;
             match result {
                 Ok(SaveReleaseOutcome::Saved) => summary.saved += 1,
                 Ok(SaveReleaseOutcome::AlreadyExists) => summary.skipped += 1,
@@ -113,6 +92,68 @@ impl ImportMusicUseCase {
     }
 }
 
+/// Validated source releases and the number of rejected candidates.
+#[derive(Default, getset::Getters, getset::CopyGetters)]
+pub(crate) struct ImportCheckResult {
+    /// Retains source keys alongside validated releases for reporting.
+    #[getset(get = "pub(crate)")]
+    releases: Vec<(String, ImportRelease)>,
+    /// Counts candidates that could not be read or validated.
+    #[getset(get_copy = "pub(crate)")]
+    failed: usize,
+}
+
+/// Reads and validates import candidates without a destination storage.
+pub(crate) struct ImportCheckUseCase {
+    source: Arc<dyn ImportSource>,
+}
+
+impl ImportCheckUseCase {
+    /// Connects the read-only source used for validation.
+    pub(crate) fn new(source: Arc<dyn ImportSource>) -> Self {
+        Self { source }
+    }
+
+    /// Collects validated releases while continuing after candidate failures.
+    pub(crate) async fn execute(&self) -> Result<ImportCheckResult, ImportMusicError> {
+        let source = self.source.clone();
+        let candidates = spawn_blocking(move || source.list_releases()).await??;
+
+        let mut result = ImportCheckResult::default();
+        let mut planned = HashSet::new();
+
+        for candidate in candidates {
+            let key = candidate.key().clone();
+            let source = self.source.clone();
+            let release = spawn_blocking(move || {
+                let bytes = candidate
+                    .audio_keys()
+                    .iter()
+                    .map(|key| source.read_audio(key))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok::<_, ImportCandidateError>(ImportRelease::new(bytes)?)
+            })
+            .await
+            .map_err(ImportCandidateError::from)
+            .and_then(|release| release)
+            .and_then(|release| {
+                if !planned.insert(release.id().clone()) {
+                    return Err(ImportCandidateError::DuplicateRelease(release.id().clone()));
+                }
+                Ok(release)
+            });
+            match release {
+                Ok(release) => result.releases.push((key, release)),
+                Err(error) => {
+                    result.failed += 1;
+                    tracing::warn!(candidate = %key, error = %error, "Release validation failed");
+                }
+            }
+        }
+        Ok(result)
+    }
+}
+
 /// Verifies import orchestration using controlled source and storage outcomes.
 #[cfg(test)]
 mod tests {
@@ -123,7 +164,7 @@ mod tests {
         domain::{ingestion::metadata::sample_metadata, primitive::release::Release},
         port::{
             import_source::ImportCandidate,
-            music_storage::{ReleaseScanFailure, ScanReleasesError},
+            music_storage::{ReleaseScanFailure, SaveReleaseError, ScanReleasesError},
         },
         test_support::sample_audio,
     };
@@ -154,6 +195,11 @@ mod tests {
             match key {
                 "unreadable" => Err(ReadImportAudioError::InvalidObject { key: key.into() }),
                 "invalid" => Ok(b"invalid".to_vec()),
+                "existing" | "success" => {
+                    let mut metadata = sample_metadata();
+                    metadata.release_title_mut().push_str(key);
+                    Ok(sample_audio(&metadata))
+                }
                 _ => Ok(self.bytes.clone()),
             }
         }
@@ -228,8 +274,56 @@ mod tests {
             (result.saved(), result.skipped(), result.failed()),
             (1, 1, 3)
         );
-        assert_eq!(*storage.saved.lock().unwrap(), vec![vec![bytes]; 3]);
+        let mut existing = sample_metadata();
+        existing.release_title_mut().push_str("existing");
+        let mut success = sample_metadata();
+        success.release_title_mut().push_str("success");
+        let saved = storage.saved.lock().unwrap();
+        assert_eq!(saved.len(), 3);
+        assert!(saved[0] == vec![bytes]);
+        for (audio, metadata) in saved[1..].iter().zip([existing, success]) {
+            assert_eq!(
+                ImportRelease::new(audio.clone()).unwrap().id(),
+                ImportRelease::new(vec![sample_audio(&metadata)])
+                    .unwrap()
+                    .id()
+            );
+        }
         assert!(storage.outcomes.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn import_check_rejects_duplicate_releases_before_persistence() {
+        let source = Arc::new(Source {
+            candidates: vec![vec!["first".into()], vec!["duplicate".into()]],
+            bytes: sample_audio(&sample_metadata()),
+            unavailable: false,
+        });
+        let checked = ImportCheckUseCase::new(source.clone())
+            .execute()
+            .await
+            .unwrap();
+        assert_eq!(checked.releases().len(), 1);
+        assert_eq!(checked.releases()[0].0, "0");
+        assert_eq!(checked.failed(), 1);
+
+        for outcome in [
+            Err(()),
+            Ok(SaveReleaseOutcome::AlreadyExists),
+            Ok(SaveReleaseOutcome::Saved),
+        ] {
+            let expected_failed = if outcome.is_err() { 2 } else { 1 };
+            let storage = Arc::new(Storage {
+                outcomes: Mutex::new(VecDeque::from([outcome])),
+                saved: Mutex::new(vec![]),
+            });
+            let result = ImportMusicUseCase::new(source.clone(), storage.clone())
+                .execute(false)
+                .await
+                .unwrap();
+            assert_eq!(storage.saved.lock().unwrap().len(), 1);
+            assert_eq!(result.failed(), expected_failed);
+        }
     }
 
     #[tokio::test]

@@ -40,6 +40,8 @@ pub(crate) struct ImportAudio {
 /// A complete release eligible for storage with newly issued audio identities.
 #[derive(Clone, getset::Getters)]
 pub(crate) struct ImportRelease {
+    /// Exposes validated metadata for reporting source releases.
+    #[getset(get = "pub(crate)")]
     metadata: ReleaseMetadata,
     /// Provides every validated source for release-level persistence.
     #[getset(get = "pub(crate)")]

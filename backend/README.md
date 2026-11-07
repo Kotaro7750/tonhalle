@@ -33,7 +33,7 @@ tonhalle-backend import \
   --music-storage--root-path /path/to/storage
 ```
 
-Each release is validated before saving.
+All source candidates are read and validated before saving the valid releases.
 Existing releases are skipped without being overwritten.
 If a release fails, the remaining releases are still processed.
 The command prints `saved`, `skipped`, and `failed` counts and exits with a nonzero status if any release failed.
@@ -41,10 +41,29 @@ The command prints `saved`, `skipped`, and `failed` counts and exits with a nonz
 Import does not update the metadata index.
 Start or restart the API server after importing to rebuild the index.
 
+Add `--dry-run` to check source releases and destination save conditions without writing files or objects.
+This option still requires music-storage configuration and reports `saved` counts as if the releases had been saved.
+
+### Import Check
+
+Read and validate source releases without configuring or accessing music storage:
+
+```sh
+tonhalle-backend import-check \
+  --import-source--mode filesystem \
+  --import-source--root-path /path/to/source
+```
+
+The command uses the same source reading and domain validation as `import`.
+It prints each valid release's ID and title, separated by a tab.
+When multiple source candidates have the same release ID, the first valid candidate is retained and later candidates are reported as failures by both `import-check` and `import`.
+If a release fails validation or cannot be read, the remaining releases are still checked and listed, and the command exits with a nonzero status.
+It does not check whether releases already exist at a destination.
+
 ### Command Help
 
 A subcommand is required.
-Use `tonhalle-backend server --help` or `tonhalle-backend import --help` to list command options.
+Use `tonhalle-backend server --help`, `tonhalle-backend import --help`, or `tonhalle-backend import-check --help` to list command options.
 When running from source, use `cargo run --locked --` in the `backend/` directory in place of `tonhalle-backend`.
 
 ## Configuration
@@ -168,16 +187,16 @@ Currently, `filesystem` is supported.
 
 | Variable | CLI argument | Commands | Required | Default | Description |
 | --- | --- | --- | --- | --- | --- |
-| `TONHALLE_IMPORT_SOURCE__MODE` | `--import-source--mode` | `import` | No | `filesystem` | Import-source implementation. |
+| `TONHALLE_IMPORT_SOURCE__MODE` | `--import-source--mode` | `import`, `import-check` | No | `filesystem` | Import-source implementation. |
 
 #### Filesystem
 
 | Variable | CLI argument | Commands | Required | Default | Description |
 | --- | --- | --- | --- | --- | --- |
-| `TONHALLE_IMPORT_SOURCE__ROOT_PATH` | `--import-source--root-path` | `import` | Yes | - | Existing filesystem source directory tree, read without modification. |
+| `TONHALLE_IMPORT_SOURCE__ROOT_PATH` | `--import-source--root-path` | `import`, `import-check` | Yes | - | Existing filesystem source directory tree, read without modification. |
 
 ### Logging
 
 | Variable | Commands | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `RUST_LOG` | `server`, `import` | No | `info` | Tracing filter for JSON logs; invalid filters fall back to `info`. |
+| `RUST_LOG` | `server`, `import`, `import-check` | No | `info` | Tracing filter for JSON logs; invalid filters fall back to `info`. |

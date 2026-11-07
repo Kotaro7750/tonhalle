@@ -31,6 +31,8 @@ pub(crate) struct ReleaseMetadata {
     /// Identifies the release derived from embedded metadata.
     #[getset(get = "pub(crate)")]
     id: ReleaseId,
+    /// Preserves the release title for display.
+    #[getset(get = "pub(crate)")]
     title: String,
     release_date: Option<String>,
     artist_credits: Vec<ArtistCredit>,

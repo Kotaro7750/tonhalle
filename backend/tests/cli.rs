@@ -299,3 +299,59 @@ fn content_access_cli_selects_provider_and_validates_cloudfront_settings() {
             .contains("validity_seconds must be greater than zero")
     );
 }
+
+#[test]
+fn import_check_cli_lists_releases_without_destination_configuration() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../sample");
+    let output = run(
+        &[
+            "import-check",
+            "--import-source--root-path",
+            source.to_str().unwrap(),
+        ],
+        &[("TONHALLE_MUSIC_STORAGE__MODE", "invalid")],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let releases = stdout
+        .lines()
+        .filter(|line| line.starts_with("release-"))
+        .collect::<Vec<_>>();
+    assert_eq!(releases.len(), 3, "{stdout}");
+    assert!(releases.iter().all(|line| {
+        line.split_once('\t')
+            .is_some_and(|(_, title)| !title.is_empty())
+    }));
+    let help = run(&["import-check", "--help"], &[]);
+    assert!(help.status.success());
+    assert!(!String::from_utf8_lossy(&help.stdout).contains("--music-storage"));
+    assert!(!run(&["import-check"], &[]).status.success());
+}
+
+#[test]
+fn import_check_cli_lists_valid_releases_and_fails_when_another_candidate_is_invalid() {
+    let source = tempfile::tempdir().unwrap();
+    create_dir(source.path().join("invalid")).unwrap();
+    write(source.path().join("invalid/audio.wav"), b"invalid").unwrap();
+    create_dir(source.path().join("valid")).unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../sample/release-2c1bb1cd9fcd50dd123abf124fefd09c111b08bb4b8453a4c232073cdbfda16e/f8c2a61f-a7ec-4fdb-b154-44f38aa0d7c7.mp3");
+    copy(fixture, source.path().join("valid/track.mp3")).unwrap();
+    let output = run(
+        &["import-check"],
+        &[(
+            "TONHALLE_IMPORT_SOURCE__ROOT_PATH",
+            source.path().to_str().unwrap(),
+        )],
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("release-2c1bb1cd9fcd50dd123abf124fefd09c111b08bb4b8453a4c232073cdbfda16e\t")
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("1 release checks failed"));
+}

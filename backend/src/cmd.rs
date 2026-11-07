@@ -2,9 +2,10 @@
 
 use clap::{Parser, Subcommand};
 
-use crate::config::{import::ImportConfig, server::ServerConfig};
+use crate::config::{import::ImportConfig, import_check::ImportCheckConfig, server::ServerConfig};
 
 pub(crate) mod import;
+pub(crate) mod import_check;
 pub(crate) mod server;
 
 /// Command-line interface for backend operations.
@@ -25,4 +26,6 @@ pub(crate) enum Command {
     Server(ServerConfig),
     /// Import audio releases without updating the metadata index.
     Import(ImportConfig),
+    /// Read and validate source releases without destination storage.
+    ImportCheck(ImportCheckConfig),
 }
