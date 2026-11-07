@@ -143,7 +143,14 @@ mod tests {
         let release_id = release_metadata(&source).unwrap().id().clone();
         let original = ingest_sample(&source, &release_id).unwrap();
 
-        for date in [None, Some("2026"), Some("2026-10"), Some("2024-02-29")] {
+        for date in [
+            None,
+            Some(""),
+            Some(" \t　"),
+            Some("2026"),
+            Some("2026-10"),
+            Some("2024-02-29"),
+        ] {
             let mut changed = source.clone();
             *changed.release_date_mut() = date.map(str::to_owned);
             let (track, metadata) = ingest_sample(&changed, &release_id).unwrap();
@@ -155,7 +162,10 @@ mod tests {
                 track.original_audio_file().id(),
                 original.0.original_audio_file().id()
             );
-            assert_eq!(release.release_date().as_deref(), date);
+            assert_eq!(
+                release.release_date().as_deref(),
+                date.filter(|value| !value.trim().is_empty())
+            );
         }
     }
 

@@ -678,7 +678,7 @@ mod tests {
         write_audio(temp.path(), &source.clone());
 
         let mut duplicate = source.clone();
-        duplicate.release_title_mut().push(' ');
+        *duplicate.release_date_mut() = Some("2025".into());
         let audio_id = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
 
         write_audio_with_id(temp.path(), &duplicate, audio_id);

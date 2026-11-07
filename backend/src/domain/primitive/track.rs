@@ -66,10 +66,13 @@ impl TrackMetadata {
         artist_names: &[String],
         artist_mbids: &[String],
     ) -> Result<Self, TrackValidationError> {
+        let title = normalization::text(title);
         let normalized_title =
             normalization::required(title).ok_or(TrackValidationError::MissingTitle)?;
-        let disc_number = number(disc_number).ok_or(TrackValidationError::InvalidDiscNumber)?;
-        let track_number = number(track_number).ok_or(TrackValidationError::InvalidTrackNumber)?;
+        let disc_number = number(normalization::text(disc_number))
+            .ok_or(TrackValidationError::InvalidDiscNumber)?;
+        let track_number = number(normalization::text(track_number))
+            .ok_or(TrackValidationError::InvalidTrackNumber)?;
         let artist_credits = artist_credits(artist_names, artist_mbids)?;
 
         let id = TrackId::from_metadata(json!([
@@ -182,7 +185,7 @@ mod tests {
                 .unwrap()
                 .id()
         );
-        for invalid in ["", "0", "-1", "+1", "1.0", " 1"] {
+        for invalid in ["", "0", "-1", "+1", "1.0"] {
             assert!(matches!(
                 TrackMetadata::new(&id, "Track", invalid, "1", None, &names, &[]),
                 Err(TrackValidationError::InvalidDiscNumber)
@@ -192,6 +195,30 @@ mod tests {
                 Err(TrackValidationError::InvalidTrackNumber)
             ));
         }
+    }
+
+    #[test]
+    fn track_metadata_new_trims_titles_and_positions_before_validation() {
+        let id = format!("release-{}", "a".repeat(64)).parse().unwrap();
+        let names = ["Artist".into()];
+        let track = TrackMetadata::new(
+            &id,
+            "　Cafe\u{301}\u{a0}",
+            "\t1　",
+            "　2/12\n",
+            None,
+            &names,
+            &[],
+        )
+        .unwrap();
+        let expected = TrackMetadata::new(&id, "Café", "1", "2", None, &names, &[]).unwrap();
+
+        assert_eq!(track.id(), expected.id());
+        assert_eq!(track.title(), "Cafe\u{301}");
+        assert_eq!(track.disc_number(), 1);
+        assert_eq!(track.track_number(), 2);
+        assert!(TrackMetadata::new(&id, "　\u{a0}", "1", "2", None, &names, &[]).is_err());
+        assert!(TrackMetadata::new(&id, "Track", "　\u{a0}", "2", None, &names, &[]).is_err());
     }
 
     #[test]

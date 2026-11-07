@@ -81,6 +81,7 @@ pub(crate) fn artist_credits(
         .zip(joins)
         .enumerate()
         .map(|(position, (name, join_phrase))| {
+            let name = normalization::text(&name).to_owned();
             let normalized =
                 normalization::required(&name).ok_or(ArtistCreditValidationError::MissingName)?;
 
@@ -142,9 +143,11 @@ mod tests {
             "f7b87070-d876-4a11-997a-048cdff1a87d".into(),
         ];
 
-        let credits = artist_credits(&["One FeAt. Two".into()], &mbids).unwrap();
+        let credits = artist_credits(&["　One  FeAt.  Two\u{a0}".into()], &mbids).unwrap();
 
         assert_eq!(credits.len(), 2);
+        assert_eq!(credits[0].name(), "One");
+        assert_eq!(credits[1].name(), "Two");
         assert_eq!(credits[0].join_phrase(), Some(" FeAt. "));
         assert_eq!(credits[1].join_phrase(), None);
 

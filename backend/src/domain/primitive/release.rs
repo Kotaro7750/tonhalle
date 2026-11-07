@@ -46,6 +46,8 @@ impl ReleaseMetadata {
         artist_names: &[String],
         artist_mbids: &[String],
     ) -> Result<Self, ReleaseMetadataValidationError> {
+        let title = normalization::text(title);
+        let release_date = normalization::optional(release_date);
         let normalized_title =
             normalization::required(title).ok_or(ReleaseMetadataValidationError::MissingTitle)?;
         if let Some(date) = release_date {
@@ -313,16 +315,18 @@ mod tests {
 
     #[test]
     fn release_new_checks_all_release_metadata_before_excluding_duplicates() {
-        let source = sample_metadata();
+        let mut source = sample_metadata();
+        *source.release_title_mut() = "Café".into();
+        source.release_credit_mut().names_mut()[0] = "Café".into();
         let id = release_metadata(&source).unwrap().id().clone();
-        let original = sample_track(&sample_metadata(), &id, sample_audio_file());
+        let original = sample_track(&source, &id, sample_audio_file());
 
         for field in ["title", "credits", "date", "missing_date"] {
-            let mut changed = sample_metadata();
+            let mut changed = source.clone();
 
             match field {
-                "title" => changed.release_title_mut().push(' '),
-                "credits" => changed.release_credit_mut().names_mut()[0].push(' '),
+                "title" => *changed.release_title_mut() = "Cafe\u{301}".into(),
+                "credits" => changed.release_credit_mut().names_mut()[0] = "Cafe\u{301}".into(),
                 "date" => *changed.release_date_mut() = Some("2026".into()),
                 _ => *changed.release_date_mut() = None,
             }
@@ -412,6 +416,26 @@ mod tests {
         changed.release_title_mut().push_str(" Revised");
 
         assert_ne!(first.id(), release_metadata(&changed).unwrap().id());
+    }
+
+    #[test]
+    fn release_metadata_new_trims_display_values_and_treats_blank_dates_as_absent() {
+        let names = ["　Cafe\u{301}\u{a0}".into()];
+        let expected =
+            ReleaseMetadata::new("Cafe\u{301}", None, &["Cafe\u{301}".into()], &[]).unwrap();
+
+        for date in [None, Some(""), Some(" \t\n　\u{a0}")] {
+            let metadata = ReleaseMetadata::new("　Cafe\u{301}\u{a0}", date, &names, &[]).unwrap();
+            assert_eq!(metadata, expected);
+            assert_eq!(metadata.title(), "Cafe\u{301}");
+            assert_eq!(metadata.artist_credits[0].name(), "Cafe\u{301}");
+        }
+
+        let dated = ReleaseMetadata::new("Release", Some("　2026-10 \n"), &names, &[]).unwrap();
+        assert_eq!(dated.release_date.as_deref(), Some("2026-10"));
+        assert!(ReleaseMetadata::new("Release", Some(" 2026-02-29 "), &names, &[]).is_err());
+        assert!(ReleaseMetadata::new("　\u{a0}", None, &names, &[]).is_err());
+        assert!(ReleaseMetadata::new("Release", None, &["　\u{a0}".into()], &[]).is_err());
     }
 
     #[test]

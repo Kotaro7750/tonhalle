@@ -1,14 +1,21 @@
-//! Normalizes metadata values used to identify music entities.
+//! Normalizes metadata text and identity inputs for music entities.
 
 use unicode_normalization::UnicodeNormalization;
 use uuid::{Uuid, fmt::Hyphenated};
 
-/// Trims ASCII whitespace and applies NFC for identity generation.
+/// Trims surrounding Unicode whitespace while preserving internal text.
+pub(crate) fn text(value: &str) -> &str {
+    value.trim()
+}
+
+/// Trims optional metadata text and treats empty values as absent.
+pub(crate) fn optional(value: Option<&str>) -> Option<&str> {
+    value.map(text).filter(|value| !value.is_empty())
+}
+
+/// Trims Unicode whitespace and applies NFC for identity generation.
 pub(crate) fn normalize(value: &str) -> String {
-    value
-        .trim_matches(|c: char| c.is_ascii_whitespace())
-        .nfc()
-        .collect()
+    text(value).nfc().collect()
 }
 
 /// Normalizes required identity inputs and omits values that become empty.
@@ -32,9 +39,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normalize_trims_ascii_whitespace_and_applies_nfc() {
+    fn normalize_trims_unicode_whitespace_and_applies_nfc() {
         assert_eq!(normalize("\tCafe\u{301} \r\n"), "Café");
-        assert_eq!(normalize("\u{a0}name\u{a0}"), "\u{a0}name\u{a0}");
+        assert_eq!(normalize("\u{a0}name\u{3000}"), "name");
     }
 
     #[test]
