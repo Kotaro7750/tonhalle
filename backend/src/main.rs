@@ -2,8 +2,11 @@
 
 use clap::Parser;
 
-use crate::cmd::{
-    import::run as run_import, import_check::run as run_import_check, server::run as run_server,
+use crate::{
+    cmd::{
+        import::run as run_import, import_check::run as run_import_check, server::run as run_server,
+    },
+    observability::LogMode,
 };
 
 mod cmd;
@@ -19,7 +22,11 @@ mod usecase;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = cmd::Cli::parse();
-    observability::init_logging();
+    let mode = match cli.command() {
+        cmd::Command::Server(_) => LogMode::Server,
+        cmd::Command::Import(_) | cmd::Command::ImportCheck(_) => LogMode::Cli,
+    };
+    observability::init_logging(mode);
 
     match cli.command() {
         cmd::Command::Server(config) => run_server(config).await?,
