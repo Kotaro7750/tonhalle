@@ -6,6 +6,7 @@ use std::{
     io::{Error as IoError, ErrorKind},
     path::{Component, Path, PathBuf, StripPrefixError},
 };
+use tokio::task::spawn_blocking;
 
 use crate::{
     domain::primitive::audio_file::MediaType,
@@ -40,6 +41,7 @@ enum FileSystemImportEnumerationError {
 }
 
 /// A read-only directory tree containing release directories.
+#[derive(Clone)]
 pub(crate) struct FileSystemImportSource {
     root: PathBuf,
 }
@@ -95,15 +97,33 @@ impl FileSystemImportSource {
     }
 }
 
+#[async_trait::async_trait]
 impl ImportSource for FileSystemImportSource {
     /// Treats each directory containing audio as one release and scans nested directories.
-    fn list_releases(&self) -> Result<Vec<ImportCandidate>, ListImportReleasesError> {
-        self.enumerate_releases()
+    async fn list_releases(&self) -> Result<Vec<ImportCandidate>, ListImportReleasesError> {
+        let source = self.clone();
+        spawn_blocking(move || source.enumerate_releases())
+            .await
+            .map_err(ListImportReleasesError::new)?
             .map_err(ListImportReleasesError::new)
     }
 
+    /// Reads source bytes without blocking an asynchronous runtime worker.
+    async fn read_audio(&self, key: &str) -> Result<Vec<u8>, ReadImportAudioError> {
+        let source = self.clone();
+        let audio_key = key.to_owned();
+        spawn_blocking(move || source.read_audio_blocking(&audio_key))
+            .await
+            .map_err(|source| ReadImportAudioError::Internal {
+                key: key.to_owned(),
+                source: Box::new(source),
+            })?
+    }
+}
+
+impl FileSystemImportSource {
     /// Rejects links and paths outside the root before reading original bytes.
-    fn read_audio(&self, key: &str) -> Result<Vec<u8>, ReadImportAudioError> {
+    fn read_audio_blocking(&self, key: &str) -> Result<Vec<u8>, ReadImportAudioError> {
         let path = Path::new(key);
         if path.is_absolute()
             || path
@@ -157,13 +177,13 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn read_audio_distinguishes_invalid_keys_missing_objects_and_invalid_objects() {
+    #[tokio::test]
+    async fn read_audio_distinguishes_invalid_keys_missing_objects_and_invalid_objects() {
         let root = tempfile::tempdir().unwrap();
         let source = FileSystemImportSource::new(root.path().to_owned()).unwrap();
-        assert!(matches!(source.read_audio("../outside.wav"),
+        assert!(matches!(source.read_audio("../outside.wav").await,
             Err(ReadImportAudioError::InvalidKey { key }) if key == "../outside.wav"));
-        let missing = source.read_audio("missing.wav").unwrap_err();
+        let missing = source.read_audio("missing.wav").await.unwrap_err();
         assert!(
             matches!(&missing, ReadImportAudioError::NotFound { key, .. } if key == "missing.wav")
         );
@@ -177,17 +197,18 @@ mod tests {
             ErrorKind::NotFound
         );
         create_dir(root.path().join("directory.wav")).unwrap();
-        assert!(matches!(source.read_audio("directory.wav"),
+        assert!(matches!(source.read_audio("directory.wav").await,
             Err(ReadImportAudioError::InvalidObject { key }) if key == "directory.wav"));
     }
 
-    #[test]
-    fn list_releases_preserves_enumeration_failure_as_its_source() {
+    #[tokio::test]
+    async fn list_releases_preserves_enumeration_failure_as_its_source() {
         let root = tempfile::tempdir().unwrap();
         let source = FileSystemImportSource::new(root.path().to_owned()).unwrap();
         root.close().unwrap();
         let error = source
             .list_releases()
+            .await
             .err()
             .expect("a missing root cannot be enumerated");
         let cause = error.source().unwrap();
@@ -197,8 +218,8 @@ mod tests {
         ));
         assert!(cause.source().is_some());
     }
-    #[test]
-    fn list_releases_groups_direct_audio_children_and_read_audio_preserves_bytes() {
+    #[tokio::test]
+    async fn list_releases_groups_direct_audio_children_and_read_audio_preserves_bytes() {
         let root = tempfile::tempdir().unwrap();
         for (path, bytes) in [
             ("artist/album/one.WAV", b"first".as_slice()),
@@ -211,7 +232,7 @@ mod tests {
             std::fs::write(path, bytes).unwrap();
         }
         let source = FileSystemImportSource::new(root.path().to_owned()).unwrap();
-        let candidates = source.list_releases().unwrap();
+        let candidates = source.list_releases().await.unwrap();
         let groups: Vec<_> = candidates
             .iter()
             .map(|candidate| candidate.audio_keys().clone())
@@ -223,8 +244,8 @@ mod tests {
                 vec!["artist/album/disc/tone.mp3"]
             ]
         );
-        assert_eq!(source.read_audio(&groups[0][0]).unwrap(), b"first");
-        assert_eq!(source.read_audio(&groups[1][0]).unwrap(), b"nested");
+        assert_eq!(source.read_audio(&groups[0][0]).await.unwrap(), b"first");
+        assert_eq!(source.read_audio(&groups[1][0]).await.unwrap(), b"nested");
         assert_eq!(
             std::fs::read(root.path().join("artist/album/one.WAV")).unwrap(),
             b"first"

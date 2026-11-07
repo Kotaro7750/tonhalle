@@ -1,11 +1,11 @@
-//! Validates complete releases before assigning storage identities.
+//! Validates individual import audio and accumulates release constraints without retaining bytes.
 
 use std::collections::HashSet;
 
 use crate::domain::{
     id::{ReleaseId, TrackId},
     ingestion::{IngestTrackError, parse_audio},
-    primitive::{audio_file::AudioProperties, release::ReleaseMetadata, track::TrackMetadata},
+    primitive::{audio_file::AudioProperties, release::ReleaseMetadata},
 };
 
 /// A rejected import candidate, leaving every source unchanged.
@@ -14,6 +14,9 @@ pub(crate) enum ImportValidationError {
     /// A release must contain audio.
     #[error("release contains no audio")]
     Empty,
+    /// At least one audio failed validation.
+    #[error("release contains invalid audio")]
+    Failed,
     /// One source failed shared metadata validation.
     #[error(transparent)]
     Audio(#[from] IngestTrackError),
@@ -25,118 +28,134 @@ pub(crate) enum ImportValidationError {
     DuplicateTrack(TrackId),
 }
 
-/// A validated source audio retaining its exact original bytes.
-#[derive(Clone, getset::Getters)]
+/// A validated source audio retained only until its individual staging write completes.
+#[derive(getset::Getters)]
 pub(crate) struct ImportAudio {
-    track_metadata: TrackMetadata,
-    /// Provides the validated format and playback properties.
+    /// Identifies the release extracted from this source.
     #[getset(get = "pub(crate)")]
+    release_id: ReleaseId,
+    #[getset(get = "pub(crate)")]
+    /// Describes the validated media format and playback properties.
     properties: AudioProperties,
-    /// Provides unchanged source bytes.
     #[getset(get = "pub(crate)")]
+    /// Preserves the original source for its staging write.
     bytes: Vec<u8>,
 }
 
-/// A complete release eligible for storage with newly issued audio identities.
-#[derive(Clone, getset::Getters)]
-pub(crate) struct ImportRelease {
-    /// Exposes validated metadata for reporting source releases.
-    #[getset(get = "pub(crate)")]
-    metadata: ReleaseMetadata,
-    /// Provides every validated source for release-level persistence.
-    #[getset(get = "pub(crate)")]
-    audio: Vec<ImportAudio>,
+impl ImportAudio {
+    /// Transfers the original bytes to the storage adapter without copying them.
+    pub(crate) fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
 }
 
-impl ImportRelease {
-    /// Validates all sources with shared domain constructors and rejects duplicate tracks.
-    pub(crate) fn new(sources: Vec<Vec<u8>>) -> Result<Self, ImportValidationError> {
-        let mut metadata = None;
-        let mut audio = Vec::new();
-        let mut tracks = HashSet::new();
-        for bytes in sources {
-            let parsed = parse_audio(&bytes)?;
-            let (track_metadata, current, properties) = parsed.into_parts();
-            let source = ImportAudio {
-                track_metadata,
-                properties,
-                bytes,
-            };
-            if metadata
-                .as_ref()
-                .is_some_and(|previous| previous != &current)
-            {
-                return Err(ImportValidationError::MetadataMismatch);
-            }
-            if !tracks.insert(source.track_metadata.id().clone()) {
-                return Err(ImportValidationError::DuplicateTrack(
-                    source.track_metadata.id().clone(),
-                ));
-            }
-            metadata = Some(current);
-            audio.push(source);
+/// Incrementally validates a release while retaining metadata rather than audio bytes.
+#[derive(Default, getset::CopyGetters)]
+pub(crate) struct ImportedReleaseValidator {
+    /// Retains the first accepted source's release metadata.
+    metadata: Option<ReleaseMetadata>,
+    /// Detects repeated originals without retaining their audio bytes.
+    tracks: HashSet<TrackId>,
+    /// Prevents completion after any rejected audio.
+    #[getset(get_copy = "pub(crate)")]
+    failed: bool,
+}
+
+impl ImportedReleaseValidator {
+    /// Parses one source and remembers failures while allowing subsequent validation.
+    pub(crate) fn push(&mut self, bytes: Vec<u8>) -> Result<ImportAudio, ImportValidationError> {
+        let result = self.validate(bytes);
+        self.failed |= result.is_err();
+        result
+    }
+
+    /// Checks source metadata before constructing audio eligible for staging.
+    fn validate(&mut self, bytes: Vec<u8>) -> Result<ImportAudio, ImportValidationError> {
+        let (track, metadata, properties) = parse_audio(&bytes)?.into_parts();
+        if self
+            .metadata
+            .as_ref()
+            .is_some_and(|previous| previous != &metadata)
+        {
+            return Err(ImportValidationError::MetadataMismatch);
         }
-        Ok(Self {
-            metadata: metadata.ok_or(ImportValidationError::Empty)?,
-            audio,
+        if !self.tracks.insert(track.id().clone()) {
+            return Err(ImportValidationError::DuplicateTrack(track.id().clone()));
+        }
+        let release_id = metadata.id().clone();
+        self.metadata.get_or_insert(metadata);
+        Ok(ImportAudio {
+            release_id,
+            properties,
+            bytes,
         })
     }
 
-    /// Identifies the release exclusively from embedded metadata.
-    pub(crate) fn id(&self) -> &ReleaseId {
-        self.metadata.id()
+    /// Completes a nonempty release after every source has been checked.
+    pub(crate) fn finish(self) -> Result<ReleaseMetadata, ImportValidationError> {
+        if self.failed {
+            return Err(ImportValidationError::Failed);
+        }
+        self.metadata.ok_or(ImportValidationError::Empty)
     }
 }
 
-/// Verifies import-specific rejection while sharing metadata constraints with indexing.
+/// Verifies release-level import constraints independently of metadata field validation.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::ingestion::metadata::sample_metadata;
-    use crate::test_support::sample_audio;
+    use crate::{domain::ingestion::metadata::sample_metadata, test_support::sample_audio};
 
     #[test]
-    fn import_release_accepts_missing_dates_and_rejects_disagreement() {
-        let dated = sample_metadata();
-        let mut undated = dated.clone();
-        *undated.release_date_mut() = None;
-        let original = ImportRelease::new(vec![sample_audio(&dated)]).unwrap();
-        let missing = ImportRelease::new(vec![sample_audio(&undated)]).unwrap();
-        assert_eq!(original.id(), missing.id());
+    fn imported_release_validator_rejects_empty_release() {
+        let validator = ImportedReleaseValidator::default();
+
         assert!(matches!(
-            ImportRelease::new(vec![sample_audio(&dated), sample_audio(&undated)]),
-            Err(ImportValidationError::MetadataMismatch)
+            validator.finish(),
+            Err(ImportValidationError::Empty)
         ));
     }
 
     #[test]
-    fn import_release_rejects_duplicates_inconsistent_metadata_and_invalid_sources() {
-        let fixture = sample_metadata();
-        let original = sample_audio(&fixture);
+    fn imported_release_validator_rejects_duplicate_audio() {
+        let mut validator = ImportedReleaseValidator::default();
+        let audio = sample_audio(&sample_metadata());
+        validator.push(audio.clone()).unwrap();
+
         assert!(matches!(
-            ImportRelease::new(vec![]),
-            Err(ImportValidationError::Empty)
-        ));
-        assert!(matches!(
-            ImportRelease::new(vec![original.clone(), original.clone()]),
+            validator.push(audio),
             Err(ImportValidationError::DuplicateTrack(_))
         ));
+    }
 
-        let mut changed = sample_metadata();
-        changed.release_title_mut().push_str(" changed");
+    #[test]
+    fn imported_release_validator_rejects_release_after_invalid_then_valid_audio() {
+        let mut validator = ImportedReleaseValidator::default();
+        assert!(validator.push(b"invalid".to_vec()).is_err());
+        validator.push(sample_audio(&sample_metadata())).unwrap();
+
         assert!(matches!(
-            ImportRelease::new(vec![original.clone(), sample_audio(&changed)]),
+            validator.finish(),
+            Err(ImportValidationError::Failed)
+        ));
+    }
+
+    #[test]
+    fn imported_release_validator_rejects_mismatched_release_metadata() {
+        let first = sample_metadata();
+        let mut second = first.clone();
+        second.release_title_mut().push_str(" changed");
+        let first_audio = sample_audio(&first);
+        let second_audio = sample_audio(&second);
+        ImportedReleaseValidator::default()
+            .push(second_audio.clone())
+            .unwrap();
+        let mut validator = ImportedReleaseValidator::default();
+        validator.push(first_audio).unwrap();
+
+        assert!(matches!(
+            validator.push(second_audio),
             Err(ImportValidationError::MetadataMismatch)
         ));
-        for field in 0..4 {
-            let mut invalid = sample_metadata();
-            match field {
-                0 => invalid.track_title_mut().clear(),
-                1 => *invalid.release_date_mut() = Some("2026-02-30".into()),
-                2 => *invalid.disc_number_mut() = "0".into(),
-                _ => invalid.track_credit_mut().names_mut().clear(),
-            }
-            assert!(ImportRelease::new(vec![original.clone(), sample_audio(&invalid)]).is_err());
-        }
     }
 }

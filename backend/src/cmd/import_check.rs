@@ -8,7 +8,7 @@ pub(crate) async fn run(config: &ImportCheckConfig) -> anyhow::Result<()> {
     let source = config.source().construct_import_source()?;
     let result = ImportCheckUseCase::new(source).execute().await?;
     for (_, release) in result.releases() {
-        println!("{}\t{}", release.id(), release.metadata().title());
+        println!("{}\t{}", release.id(), release.title());
     }
     anyhow::ensure!(
         result.failed() == 0,

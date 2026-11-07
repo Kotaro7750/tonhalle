@@ -13,13 +13,13 @@ use walkdir::WalkDir;
 use crate::{
     domain::{
         id::{AudioFileId, ParseAudioFileIdError, ReleaseId},
-        import::ImportRelease,
+        import::ImportAudio,
         ingestion::{build_release, ingest_track},
         primitive::{audio_file::MediaType, release::Release},
     },
     port::music_storage::{
-        AudioScanFailure, MusicStorage, ReleaseScanFailure, SaveReleaseError, SaveReleaseOutcome,
-        ScanReleasesError,
+        AudioScanFailure, DeleteStagingError, MusicStorage, ReleaseScanFailure, SaveReleaseError,
+        SaveReleaseOutcome, ScanReleasesError,
     },
 };
 
@@ -248,10 +248,31 @@ impl FileSystemMusicStorage {
         Ok(false)
     }
 
-    /// Writes original bytes and UUID filenames before exposing a complete release.
-    fn persist_release(
+    /// Writes one audio file without retaining bytes from any earlier source.
+    fn stage_audio_blocking(&self, audio: ImportAudio) -> Result<(), FileSystemSaveReleaseError> {
+        let id = audio.release_id();
+        self.check_destination(id)?;
+        let directory = self.root_path.join(STAGING_DIRECTORY).join(id.as_ref());
+        if let Ok(metadata) = symlink_metadata(&directory)
+            && (!metadata.is_dir() || metadata.file_type().is_symlink())
+        {
+            return Err(FileSystemSaveReleaseError::InvalidStagingDirectory);
+        }
+        create_dir_all(&directory)?;
+        let extension = audio.properties().media_type().extension();
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(directory.join(format!("{}.{}", uuid::Uuid::new_v4(), extension)))?;
+        file.write_all(audio.bytes())?;
+        file.sync_all()?;
+        Ok(())
+    }
+
+    /// Publishes the staged directory while serializing destination checks and renames.
+    fn commit_release_blocking(
         &self,
-        release: &ImportRelease,
+        id: &ReleaseId,
         dry_run: bool,
     ) -> Result<SaveReleaseOutcome, FileSystemSaveReleaseError> {
         let _lock = if dry_run {
@@ -266,44 +287,42 @@ impl FileSystemMusicStorage {
             lock.lock()?;
             Some(lock)
         };
-        if self.check_destination(release.id())? {
+        if self.check_destination(id)? {
             return Ok(SaveReleaseOutcome::AlreadyExists);
         }
         if dry_run {
             return Ok(SaveReleaseOutcome::Saved);
         }
-        let destination = self.root_path.join(release.id().as_ref());
-        let staging_root = self.root_path.join(STAGING_DIRECTORY);
-        create_dir_all(&staging_root)?;
-        let staging = tempfile::tempdir_in(staging_root)?;
-        for audio in release.audio() {
-            let extension = audio.properties().media_type().extension();
-            let mut file = OpenOptions::new().write(true).create_new(true).open(
-                staging
-                    .path()
-                    .join(format!("{}.{}", uuid::Uuid::new_v4(), extension)),
-            )?;
-            file.write_all(audio.bytes())?;
-            file.sync_all()?;
+        let staging = self.root_path.join(STAGING_DIRECTORY).join(id.as_ref());
+        if !symlink_metadata(&staging)?.is_dir() {
+            return Err(FileSystemSaveReleaseError::InvalidStagingDirectory);
         }
-        File::open(staging.path())?.sync_all()?;
-        rename(staging.path(), destination)?;
+        File::open(&staging)?.sync_all()?;
+        rename(staging, self.root_path.join(id.as_ref()))?;
         File::open(&self.root_path)?.sync_all()?;
         Ok(SaveReleaseOutcome::Saved)
+    }
+
+    /// Removes temporary audio without following a staging symlink.
+    fn delete_staging_blocking(&self, id: Option<&ReleaseId>) -> Result<(), IoError> {
+        let root = self.root_path.join(STAGING_DIRECTORY);
+        match symlink_metadata(&root) {
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+            Ok(metadata) if !metadata.is_dir() || metadata.file_type().is_symlink() => {
+                return Err(IoError::other("invalid staging directory"));
+            }
+            Ok(_) => {}
+        }
+        let path = id.map_or(root.clone(), |id| root.join(id.as_ref()));
+        match std::fs::remove_dir_all(path) {
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+            result => result,
+        }
     }
 }
 
 impl FileSystemMusicStorage {
-    /// Publishes a validated release without replacing existing audio.
-    fn save_release_blocking(
-        &self,
-        release: &ImportRelease,
-        dry_run: bool,
-    ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
-        self.persist_release(release, dry_run)
-            .map_err(|source| Self::save_error(release.id(), source))
-    }
-
     /// Preserves destination conflicts and underlying filesystem errors.
     fn save_error(id: &ReleaseId, source: FileSystemSaveReleaseError) -> SaveReleaseError {
         match source {
@@ -385,20 +404,49 @@ impl FileSystemMusicStorage {
 
 #[async_trait::async_trait]
 impl MusicStorage for FileSystemMusicStorage {
-    async fn save_release(
+    async fn stage_audio(&self, audio: ImportAudio) -> Result<(), SaveReleaseError> {
+        let storage = self.clone();
+        let id = audio.release_id().clone();
+        let worker_id = id.clone();
+        spawn_blocking(move || {
+            storage
+                .stage_audio_blocking(audio)
+                .map_err(|source| Self::save_error(&worker_id, source))
+        })
+        .await
+        .map_err(|source| SaveReleaseError::Internal {
+            id,
+            source: Box::new(source),
+        })?
+    }
+
+    async fn commit_release(
         &self,
-        release: &ImportRelease,
+        id: &ReleaseId,
         dry_run: bool,
     ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
         let storage = self.clone();
-        let release = release.clone();
-        let id = release.id().clone();
-        spawn_blocking(move || storage.save_release_blocking(&release, dry_run))
+        let id = id.clone();
+        let worker_id = id.clone();
+        spawn_blocking(move || {
+            storage
+                .commit_release_blocking(&worker_id, dry_run)
+                .map_err(|source| Self::save_error(&worker_id, source))
+        })
+        .await
+        .map_err(|source| SaveReleaseError::Internal {
+            id,
+            source: Box::new(source),
+        })?
+    }
+
+    async fn delete_staging(&self, id: Option<&ReleaseId>) -> Result<(), DeleteStagingError> {
+        let storage = self.clone();
+        let id = id.cloned();
+        spawn_blocking(move || storage.delete_staging_blocking(id.as_ref()))
             .await
-            .map_err(|source| SaveReleaseError::Internal {
-                id,
-                source: Box::new(source),
-            })?
+            .map_err(DeleteStagingError::new)?
+            .map_err(DeleteStagingError::new)
     }
 
     async fn scan_releases(
@@ -438,6 +486,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::test_support::{sample_import_audio, validate_import_release};
     use crate::{
         domain::{
             ingestion::{
@@ -477,13 +526,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn save_release_distinguishes_conflicts_and_preserves_io_failure_causes() {
+    async fn commit_release_distinguishes_conflicts_and_preserves_io_failure_causes() {
         let root = tempfile::tempdir().unwrap();
-        let release = ImportRelease::new(vec![sample_audio(&sample_metadata())]).unwrap();
+        let release = validate_import_release(vec![sample_audio(&sample_metadata())]).unwrap();
         let storage = FileSystemMusicStorage::for_import(root.path().to_path_buf()).unwrap();
         let destination = root.path().join(release.id().as_ref());
         write(&destination, b"existing object").unwrap();
-        assert!(matches!(storage.save_release(&release, false).await,
+        assert!(matches!(storage.commit_release(release.id(), false).await,
             Err(SaveReleaseError::Conflict { id }) if &id == release.id()));
         assert_eq!(read(destination).unwrap(), b"existing object");
 
@@ -491,7 +540,10 @@ mod tests {
         std::fs::create_dir(&missing).unwrap();
         let storage = FileSystemMusicStorage::for_import(missing.clone()).unwrap();
         std::fs::remove_dir(missing).unwrap();
-        let error = storage.save_release(&release, false).await.unwrap_err();
+        let error = storage
+            .commit_release(release.id(), false)
+            .await
+            .unwrap_err();
         assert!(matches!(&error, SaveReleaseError::Internal { id, .. } if id == release.id()));
         let io = error
             .source()
@@ -747,16 +799,23 @@ mod tests {
         );
     }
     #[tokio::test]
-    async fn save_release_preserves_bytes_and_persistent_uuids_without_overwriting_existing_releases()
+    async fn commit_release_preserves_bytes_and_persistent_uuids_without_overwriting_existing_releases()
      {
         let root = tempfile::tempdir().unwrap();
         let storage = FileSystemMusicStorage::for_import(root.path().to_owned()).unwrap();
         let mut second = sample_metadata();
         *second.track_number_mut() = "2".into();
         let bytes = vec![sample_audio(&sample_metadata()), sample_audio(&second)];
-        let release = ImportRelease::new(bytes.clone()).unwrap();
+        let release = validate_import_release(bytes.clone()).unwrap();
+        for bytes in &bytes {
+            storage
+                .stage_audio(sample_import_audio(bytes.clone()))
+                .await
+                .unwrap();
+        }
+        assert!(storage.scan_releases().await.unwrap().is_empty());
         assert_eq!(
-            storage.save_release(&release, false).await.unwrap(),
+            storage.commit_release(release.id(), false).await.unwrap(),
             SaveReleaseOutcome::Saved
         );
         let directory = root.path().join(release.id().as_ref());
@@ -781,26 +840,71 @@ mod tests {
         }
         let reopened = FileSystemMusicStorage::for_import(root.path().to_owned()).unwrap();
         assert_eq!(
-            reopened.save_release(&release, false).await.unwrap(),
+            reopened.commit_release(release.id(), false).await.unwrap(),
             SaveReleaseOutcome::AlreadyExists
         );
         assert_eq!(snapshot(), original);
     }
 
     #[tokio::test]
-    async fn save_release_serializes_concurrent_writes() {
+    async fn delete_staging_removes_selected_or_all_temporary_audio_without_touching_releases() {
+        let root = tempfile::tempdir().unwrap();
+        let storage = FileSystemMusicStorage::for_import(root.path().to_owned()).unwrap();
+        let first = sample_metadata();
+        let mut second = first.clone();
+        second.release_title_mut().push_str(" second");
+        let first_id = release_metadata(&first).unwrap().id().clone();
+        let second_id = release_metadata(&second).unwrap().id().clone();
+        for metadata in [&first, &second] {
+            let audio = sample_import_audio(sample_audio(metadata));
+            storage.stage_audio(audio).await.unwrap();
+        }
+        storage.delete_staging(Some(&first_id)).await.unwrap();
+        storage.delete_staging(Some(&first_id)).await.unwrap();
+        assert!(
+            !root
+                .path()
+                .join(STAGING_DIRECTORY)
+                .join(first_id.as_ref())
+                .exists()
+        );
+        assert!(
+            root.path()
+                .join(STAGING_DIRECTORY)
+                .join(second_id.as_ref())
+                .exists()
+        );
+        storage.commit_release(&second_id, false).await.unwrap();
+        storage
+            .stage_audio(sample_import_audio(sample_audio(&first)))
+            .await
+            .unwrap();
+        storage.delete_staging(None).await.unwrap();
+        storage.delete_staging(None).await.unwrap();
+        assert!(!root.path().join(STAGING_DIRECTORY).exists());
+        assert!(root.path().join(second_id.as_ref()).is_dir());
+    }
+
+    #[tokio::test]
+    async fn commit_release_serializes_concurrent_writes() {
         let root = tempfile::tempdir().unwrap();
         let storage = std::sync::Arc::new(
             FileSystemMusicStorage::for_import(root.path().to_owned()).unwrap(),
         );
         let release = std::sync::Arc::new(
-            ImportRelease::new(vec![sample_audio(&sample_metadata())]).unwrap(),
+            validate_import_release(vec![sample_audio(&sample_metadata())]).unwrap(),
         );
+        storage
+            .stage_audio(sample_import_audio(sample_audio(&sample_metadata())))
+            .await
+            .unwrap();
         let workers: Vec<_> = (0..2)
             .map(|_| {
                 let storage = storage.clone();
                 let release = release.clone();
-                tokio::spawn(async move { storage.save_release(&release, false).await.unwrap() })
+                tokio::spawn(
+                    async move { storage.commit_release(release.id(), false).await.unwrap() },
+                )
             })
             .collect();
         let mut results = Vec::new();

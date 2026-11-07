@@ -63,8 +63,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        domain::{id::ReleaseId, import::ImportRelease, ingestion::metadata::sample_metadata},
-        port::music_storage::{ReleaseScanFailure, SaveReleaseError, SaveReleaseOutcome},
+        domain::{id::ReleaseId, import::ImportAudio, ingestion::metadata::sample_metadata},
+        port::music_storage::{
+            DeleteStagingError, ReleaseScanFailure, SaveReleaseError, SaveReleaseOutcome,
+        },
         test_support::sample_release,
     };
 
@@ -74,9 +76,17 @@ mod tests {
     #[async_trait::async_trait]
     impl MusicStorage for UnavailableStorage {
         /// Index-only fixtures must never receive writes.
-        async fn save_release(
+        async fn stage_audio(&self, _: ImportAudio) -> Result<(), SaveReleaseError> {
+            panic!("index construction must not write music storage")
+        }
+
+        async fn delete_staging(&self, _: Option<&ReleaseId>) -> Result<(), DeleteStagingError> {
+            panic!("index construction must not write music storage")
+        }
+
+        async fn commit_release(
             &self,
-            _: &ImportRelease,
+            _: &ReleaseId,
             _: bool,
         ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
             panic!("index construction must not write music storage")
@@ -99,9 +109,17 @@ mod tests {
     #[async_trait::async_trait]
     impl MusicStorage for FixtureStorage {
         /// Index-only fixtures must never receive writes.
-        async fn save_release(
+        async fn stage_audio(&self, _: ImportAudio) -> Result<(), SaveReleaseError> {
+            panic!("index construction must not write music storage")
+        }
+
+        async fn delete_staging(&self, _: Option<&ReleaseId>) -> Result<(), DeleteStagingError> {
+            panic!("index construction must not write music storage")
+        }
+
+        async fn commit_release(
             &self,
-            _: &ImportRelease,
+            _: &ReleaseId,
             _: bool,
         ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
             panic!("index construction must not write music storage")

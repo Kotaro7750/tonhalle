@@ -16,13 +16,13 @@ use uuid::Uuid;
 use crate::{
     domain::{
         id::{AudioFileId, ParseAudioFileIdError, ReleaseId},
-        import::ImportRelease,
+        import::ImportAudio,
         ingestion::{build_release, ingest_track},
         primitive::{audio_file::MediaType, release::Release},
     },
     port::music_storage::{
-        AudioScanFailure, MusicStorage, ReleaseScanFailure, SaveReleaseError, SaveReleaseOutcome,
-        ScanReleasesError,
+        AudioScanFailure, DeleteStagingError, MusicStorage, ReleaseScanFailure, SaveReleaseError,
+        SaveReleaseOutcome, ScanReleasesError,
     },
 };
 
@@ -112,43 +112,56 @@ impl S3MusicStorage {
         Ok(!existing.contents().is_empty())
     }
 
-    /// Saves audio directly after checking for existing objects in the release.
-    ///
-    /// This is best effort: concurrent writes are not serialized, and failed saves may leave a partial release that later imports skip.
-    async fn save(
+    /// Enumerates temporary objects completely before copying or deleting them.
+    async fn staging_keys(
         &self,
-        release: &ImportRelease,
-        dry_run: bool,
-    ) -> Result<SaveReleaseOutcome, S3SaveReleaseError> {
-        if self.check_destination(release.id()).await? {
-            return Ok(SaveReleaseOutcome::AlreadyExists);
+        id: Option<&ReleaseId>,
+    ) -> Result<Vec<String>, S3SaveReleaseError> {
+        let relative = id.map_or_else(
+            || ".tonhalle-import/".to_owned(),
+            |id| format!(".tonhalle-import/{id}/"),
+        );
+        let mut pages = self
+            .client
+            .list_objects_v2()
+            .bucket(&self.bucket)
+            .prefix(self.key(&relative))
+            .into_paginator()
+            .send();
+        let mut keys = Vec::new();
+        while let Some(page) = pages.next().await {
+            let page = page.map_err(|source| S3SaveReleaseError::List(Box::new(source)))?;
+            keys.extend(
+                page.contents()
+                    .iter()
+                    .filter_map(|object| object.key().map(str::to_owned)),
+            );
         }
-        if dry_run {
-            return Ok(SaveReleaseOutcome::Saved);
-        }
-        let prefix = self.key(&format!("{}/", release.id()));
-
-        // Upload each original independently with a new audio identity and its delivery content type.
-        for audio in release.audio() {
-            let media = audio.properties().media_type();
-            let key = format!("{prefix}{}.{}", Uuid::new_v4(), media.extension());
-            self.client
-                .put_object()
-                .bucket(&self.bucket)
-                .key(&key)
-                .content_type(media.as_str())
-                .body(ByteStream::from(audio.bytes().clone()))
-                .send()
-                .await
-                .map_err(|source| S3SaveReleaseError::Put {
-                    object_key: key,
-                    source: Box::new(source),
-                })?;
-        }
-        Ok(SaveReleaseOutcome::Saved)
+        Ok(keys)
     }
 
-    /// Reads an object completely while preserving SDK and body failures.
+    /// Encodes a copy source as a bucket and key path, including reserved key characters.
+    fn copy_source(&self, key: &str) -> String {
+        let mut url = Url::parse("https://s3.invalid/").unwrap();
+        url.path_segments_mut()
+            .unwrap()
+            .clear()
+            .push(&self.bucket)
+            .extend(key.split('/'));
+        url.path().trim_start_matches('/').to_owned()
+    }
+
+    /// Preserves the release identity and the underlying SDK failure.
+    fn save_error(
+        id: &ReleaseId,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> SaveReleaseError {
+        SaveReleaseError::Internal {
+            id: id.clone(),
+            source: Box::new(source),
+        }
+    }
+
     async fn read(&self, key: &str) -> Result<Vec<u8>, S3ReadAudioError> {
         Ok(self
             .client
@@ -243,17 +256,108 @@ impl S3MusicStorage {
 
 #[async_trait::async_trait]
 impl MusicStorage for S3MusicStorage {
-    async fn save_release(
+    async fn stage_audio(&self, audio: ImportAudio) -> Result<(), SaveReleaseError> {
+        let id = audio.release_id().clone();
+        let media = audio.properties().media_type();
+        let key = self.key(&format!(
+            ".tonhalle-import/{id}/{}.{}",
+            Uuid::new_v4(),
+            media.extension()
+        ));
+        self.client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(&key)
+            .content_type(media.as_str())
+            .body(ByteStream::from(audio.into_bytes()))
+            .send()
+            .await
+            .map_err(|source| {
+                Self::save_error(
+                    &id,
+                    S3SaveReleaseError::Put {
+                        object_key: key,
+                        source: Box::new(source),
+                    },
+                )
+            })?;
+        Ok(())
+    }
+
+    async fn commit_release(
         &self,
-        release: &ImportRelease,
+        id: &ReleaseId,
         dry_run: bool,
     ) -> Result<SaveReleaseOutcome, SaveReleaseError> {
-        self.save(release, dry_run)
+        if self
+            .check_destination(id)
             .await
-            .map_err(|source| SaveReleaseError::Internal {
-                id: release.id().clone(),
-                source: source.into(),
-            })
+            .map_err(|source| Self::save_error(id, source))?
+        {
+            return Ok(SaveReleaseOutcome::AlreadyExists);
+        }
+        if dry_run {
+            return Ok(SaveReleaseOutcome::Saved);
+        }
+        let keys = self
+            .staging_keys(Some(id))
+            .await
+            .map_err(|source| Self::save_error(id, source))?;
+        if keys.is_empty() {
+            return Err(Self::save_error(
+                id,
+                std::io::Error::other("no staged audio"),
+            ));
+        }
+        for key in keys {
+            let filename = key.rsplit('/').next().unwrap();
+            self.client
+                .copy_object()
+                .bucket(&self.bucket)
+                .key(self.key(&format!("{id}/{filename}")))
+                .copy_source(self.copy_source(&key))
+                .send()
+                .await
+                .map_err(|source| Self::save_error(id, source))?;
+        }
+        Ok(SaveReleaseOutcome::Saved)
+    }
+
+    async fn delete_staging(&self, id: Option<&ReleaseId>) -> Result<(), DeleteStagingError> {
+        let keys = self
+            .staging_keys(id)
+            .await
+            .map_err(DeleteStagingError::new)?;
+        for chunk in keys.chunks(1000) {
+            let objects = chunk
+                .iter()
+                .map(|key| {
+                    aws_sdk_s3::types::ObjectIdentifier::builder()
+                        .key(key)
+                        .build()
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(DeleteStagingError::new)?;
+            let delete = aws_sdk_s3::types::Delete::builder()
+                .set_objects(Some(objects))
+                .build()
+                .map_err(DeleteStagingError::new)?;
+            let result = self
+                .client
+                .delete_objects()
+                .bucket(&self.bucket)
+                .delete(delete)
+                .send()
+                .await
+                .map_err(DeleteStagingError::new)?;
+            if !result.errors().is_empty() {
+                return Err(DeleteStagingError::new(std::io::Error::other(format!(
+                    "S3 staging deletion failed: {:?}",
+                    result.errors()
+                ))));
+            }
+        }
+        Ok(())
     }
 
     async fn scan_releases(
@@ -312,9 +416,11 @@ impl MusicStorage for S3MusicStorage {
 mod tests {
     use aws_sdk_s3::{
         operation::{
+            copy_object::{CopyObjectError, CopyObjectOutput},
+            delete_objects::DeleteObjectsOutput,
             get_object::GetObjectOutput,
             list_objects_v2::{ListObjectsV2Error, ListObjectsV2Output},
-            put_object::{PutObjectError, PutObjectOutput},
+            put_object::PutObjectOutput,
         },
         types::Object,
     };
@@ -325,6 +431,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::test_support::{sample_import_audio, validate_import_release};
     use crate::{domain::ingestion::metadata::sample_metadata, test_support::sample_audio};
 
     /// Constructs an adapter whose delivery endpoint maps the bucket root.
@@ -346,64 +453,101 @@ mod tests {
         output.build()
     }
 
-    #[tokio::test]
-    async fn save_release_round_trips_audio_without_management_objects_and_skips_existing_release()
-    {
-        for (configured_prefix, object_prefix, url_prefix) in [
-            ("", "", "https://example.com/music/"),
-            (
-                "space #",
-                "space #/",
-                "https://example.com/music/space%20%23/",
-            ),
-        ] {
-            let objects = Arc::new(Mutex::new(BTreeMap::<String, Vec<u8>>::new()));
-            let state = objects.clone();
-            let list = mock!(Client::list_objects_v2)
-                .match_requests(|request| request.bucket() == Some("music"))
-                .then_compute_output(move |request| {
-                    listing(&state.lock().unwrap(), request.prefix().unwrap())
-                });
-            let state = objects.clone();
-            let put = mock!(Client::put_object)
-                .match_requests(|request| {
-                    request.bucket() == Some("music")
-                        && request.if_none_match().is_none()
-                        && request.content_type() == Some("audio/wav")
-                })
-                .then_compute_output(move |request| {
-                    state.lock().unwrap().insert(
-                        request.key().unwrap().into(),
-                        request.body().bytes().unwrap().to_vec(),
-                    );
-                    PutObjectOutput::builder().build()
-                });
-            let state = objects.clone();
-            let get = mock!(Client::get_object).then_compute_output(move |request| {
-                GetObjectOutput::builder()
-                    .body(ByteStream::from(
-                        state.lock().unwrap()[request.key().unwrap()].clone(),
-                    ))
-                    .build()
+    /// Simulates stored objects while allowing a publication failure after one copy.
+    fn object_client(objects: Arc<Mutex<BTreeMap<String, Vec<u8>>>>, fail_copy: bool) -> Client {
+        let state = objects.clone();
+        let list = mock!(Client::list_objects_v2).then_compute_output(move |request| {
+            listing(&state.lock().unwrap(), request.prefix().unwrap())
+        });
+        let state = objects.clone();
+        let put = mock!(Client::put_object)
+            .match_requests(|request| request.content_type() == Some("audio/wav"))
+            .then_compute_output(move |request| {
+                state.lock().unwrap().insert(
+                    request.key().unwrap().into(),
+                    request.body().bytes().unwrap().to_vec(),
+                );
+                PutObjectOutput::builder().build()
             });
-            let client = mock_client!(aws_sdk_s3, RuleMode::MatchAny, [&list, &put, &get]);
-            let mut storage = storage(client);
+        let state = objects.clone();
+        let copy = mock!(Client::copy_object).then_compute_response(move |request| {
+            let mut objects = state.lock().unwrap();
+            if fail_copy && objects.keys().any(|key| !key.contains(".tonhalle-import/")) {
+                return MockResponse::Error(CopyObjectError::ObjectNotInActiveTierError(
+                    aws_sdk_s3::types::error::ObjectNotInActiveTierError::builder().build(),
+                ));
+            }
+            let source = objects
+                .keys()
+                .find(|key| {
+                    let mut url = Url::parse("https://s3.invalid/").unwrap();
+                    url.path_segments_mut()
+                        .unwrap()
+                        .clear()
+                        .push("music")
+                        .extend(key.split('/'));
+                    Some(url.path().trim_start_matches('/')) == request.copy_source()
+                })
+                .unwrap()
+                .clone();
+            let bytes = objects[&source].clone();
+            objects.insert(request.key().unwrap().into(), bytes);
+            MockResponse::Output(CopyObjectOutput::builder().build())
+        });
+        let state = objects.clone();
+        let delete = mock!(Client::delete_objects).then_compute_output(move |request| {
+            let mut objects = state.lock().unwrap();
+            for object in request.delete().unwrap().objects() {
+                objects.remove(object.key());
+            }
+            DeleteObjectsOutput::builder().build()
+        });
+        let get = mock!(Client::get_object).then_compute_output(move |request| {
+            GetObjectOutput::builder()
+                .body(ByteStream::from(
+                    objects.lock().unwrap()[request.key().unwrap()].clone(),
+                ))
+                .build()
+        });
+        mock_client!(
+            aws_sdk_s3,
+            RuleMode::MatchAny,
+            [&list, &put, &copy, &delete, &get]
+        )
+    }
+
+    #[tokio::test]
+    async fn commit_release_preserves_audio_and_skips_existing_release_while_cleanup_removes_only_staging()
+     {
+        for configured_prefix in ["", "space #%/音"] {
+            let objects = Arc::new(Mutex::new(BTreeMap::new()));
+            let mut storage = storage(object_client(objects.clone(), false));
             storage.prefix = configured_prefix.into();
             let mut second = sample_metadata();
             *second.track_number_mut() = "2".into();
             let bytes = vec![sample_audio(&sample_metadata()), sample_audio(&second)];
-            let release = ImportRelease::new(bytes.clone()).unwrap();
+            let release = validate_import_release(bytes.clone()).unwrap();
+            for bytes in &bytes {
+                storage
+                    .stage_audio(sample_import_audio(bytes.clone()))
+                    .await
+                    .unwrap();
+            }
+            assert_eq!(objects.lock().unwrap().len(), 2);
+            assert!(storage.scan_releases().await.unwrap().is_empty());
             assert_eq!(
-                storage.save_release(&release, false).await.unwrap(),
+                storage.commit_release(release.id(), false).await.unwrap(),
                 SaveReleaseOutcome::Saved
             );
+            assert_eq!(objects.lock().unwrap().len(), 4);
+            storage.delete_staging(Some(release.id())).await.unwrap();
+            storage.delete_staging(None).await.unwrap();
             let snapshot = objects.lock().unwrap().clone();
             assert_eq!(snapshot.len(), 2);
-            let prefix = format!("{object_prefix}{}/", release.id());
+            let prefix = storage.key(&format!("{}/", release.id()));
             for (key, value) in &snapshot {
-                let filename = key.strip_prefix(&prefix).unwrap();
-                assert!(!filename.contains('/'));
-                filename
+                key.strip_prefix(&prefix)
+                    .unwrap()
                     .strip_suffix(".wav")
                     .unwrap()
                     .parse::<AudioFileId>()
@@ -411,7 +555,7 @@ mod tests {
                 assert!(bytes.contains(value));
             }
             assert_eq!(
-                storage.save_release(&release, false).await.unwrap(),
+                storage.commit_release(release.id(), false).await.unwrap(),
                 SaveReleaseOutcome::AlreadyExists
             );
             assert_eq!(*objects.lock().unwrap(), snapshot);
@@ -425,55 +569,28 @@ mod tests {
             assert_eq!(scanned.id(), release.id());
             assert_eq!(scanned.tracks().len(), 2);
             for track in scanned.tracks() {
-                let audio = track.original_audio_file();
-                assert!(audio.playback_url().as_str().starts_with(url_prefix));
-                assert!(snapshot.contains_key(audio.object_key()));
+                assert!(snapshot.contains_key(track.original_audio_file().object_key()));
             }
-
-            assert_eq!(put.num_calls(), 2);
         }
     }
 
     #[tokio::test]
-    async fn save_release_leaves_partial_audio_on_failure_and_skips_it_on_retry() {
-        let objects = Arc::new(Mutex::new(BTreeMap::<String, Vec<u8>>::new()));
-        let state = objects.clone();
-        let list = mock!(Client::list_objects_v2).then_compute_output(move |request| {
-            listing(&state.lock().unwrap(), request.prefix().unwrap())
-        });
-        let state = objects.clone();
-        let put = mock!(Client::put_object).then_compute_response(move |request| {
-            let mut objects = state.lock().unwrap();
-            if objects.is_empty() {
-                objects.insert(
-                    request.key().unwrap().into(),
-                    request.body().bytes().unwrap().to_vec(),
-                );
-                MockResponse::Output(PutObjectOutput::builder().build())
-            } else {
-                MockResponse::Error(PutObjectError::InvalidRequest(
-                    aws_sdk_s3::types::error::InvalidRequest::builder().build(),
-                ))
-            }
-        });
-        let state = objects.clone();
-        let get = mock!(Client::get_object).then_compute_output(move |request| {
-            GetObjectOutput::builder()
-                .body(ByteStream::from(
-                    state.lock().unwrap()[request.key().unwrap()].clone(),
-                ))
-                .build()
-        });
-        let client = mock_client!(aws_sdk_s3, RuleMode::MatchAny, [&list, &put, &get]);
-        let storage = storage(client);
+    async fn commit_release_leaves_partial_audio_on_copy_failure_and_cleanup_preserves_it() {
+        let objects = Arc::new(Mutex::new(BTreeMap::new()));
+        let storage = storage(object_client(objects.clone(), true));
         let mut second = sample_metadata();
         *second.track_number_mut() = "2".into();
-        let release = ImportRelease::new(vec![
-            sample_audio(&sample_metadata()),
-            sample_audio(&second),
-        ])
-        .unwrap();
-        assert!(storage.save_release(&release, false).await.is_err());
+        let bytes = vec![sample_audio(&sample_metadata()), sample_audio(&second)];
+        let release = validate_import_release(bytes.clone()).unwrap();
+        for bytes in bytes {
+            storage
+                .stage_audio(sample_import_audio(bytes))
+                .await
+                .unwrap();
+        }
+        assert!(storage.commit_release(release.id(), false).await.is_err());
+        assert_eq!(objects.lock().unwrap().len(), 3);
+        storage.delete_staging(None).await.unwrap();
         assert_eq!(objects.lock().unwrap().len(), 1);
         let scanned = storage
             .scan_releases()
@@ -484,16 +601,69 @@ mod tests {
             .unwrap();
         assert_eq!(scanned.tracks().len(), 1);
         assert_eq!(
-            storage.save_release(&release, false).await.unwrap(),
+            storage.commit_release(release.id(), false).await.unwrap(),
             SaveReleaseOutcome::AlreadyExists
         );
+    }
 
-        assert_eq!(put.num_calls(), 2);
+    #[tokio::test]
+    async fn delete_staging_paginates_and_batches_deletes_and_reports_object_errors() {
+        for fail_delete in [false, true] {
+            let list = mock!(Client::list_objects_v2).then_compute_output(|request| {
+                let mut output = ListObjectsV2Output::builder();
+                if request.continuation_token().is_none() {
+                    output = output.is_truncated(true).next_continuation_token("next");
+                    for i in 0..1000 {
+                        output = output.contents(
+                            Object::builder()
+                                .key(format!("space #/.tonhalle-import/release-a/{i}.wav"))
+                                .build(),
+                        );
+                    }
+                } else {
+                    output = output.is_truncated(false).contents(
+                        Object::builder()
+                            .key("space #/.tonhalle-import/release-b/last.wav")
+                            .build(),
+                    );
+                }
+                output.build()
+            });
+            let deleted = Arc::new(Mutex::new(Vec::new()));
+            let state = deleted.clone();
+            let delete = mock!(Client::delete_objects).then_compute_output(move |request| {
+                let objects = request.delete().unwrap().objects();
+                assert!(
+                    objects
+                        .iter()
+                        .all(|object| object.key().starts_with("space #/.tonhalle-import/"))
+                );
+                state.lock().unwrap().push(objects.len());
+                let mut output = DeleteObjectsOutput::builder();
+                if fail_delete {
+                    output = output.errors(
+                        aws_sdk_s3::types::Error::builder()
+                            .key(objects[0].key())
+                            .code("AccessDenied")
+                            .build(),
+                    );
+                }
+                output.build()
+            });
+            let client = mock_client!(aws_sdk_s3, RuleMode::MatchAny, [&list, &delete]);
+            let result = storage(client).delete_staging(None).await;
+            if fail_delete {
+                assert!(result.unwrap_err().to_string().contains("AccessDenied"));
+            } else {
+                result.unwrap();
+                assert_eq!(*deleted.lock().unwrap(), vec![1000, 1]);
+            }
+        }
     }
 
     #[tokio::test]
     async fn scan_releases_groups_audio_across_pages_and_reports_invalid_release_ids() {
-        let release = ImportRelease::new(vec![sample_audio(&sample_metadata())]).unwrap();
+        let release = validate_import_release(vec![sample_audio(&sample_metadata())]).unwrap();
         let id = release.id().clone();
         let first_key = format!("space #/{id}/22222222-2222-4222-8222-222222222222.wav");
         let second_key = format!("space #/{id}/33333333-3333-4333-8333-333333333333.wav");

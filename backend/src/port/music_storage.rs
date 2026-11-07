@@ -4,7 +4,7 @@ use std::error;
 
 use crate::domain::{
     id::{ParseReleaseIdError, ReleaseId},
-    import::ImportRelease,
+    import::ImportAudio,
     ingestion::IngestTrackError,
     primitive::release::{Release, ReleaseValidationError},
 };
@@ -31,6 +31,18 @@ pub(crate) enum SaveReleaseError {
         #[source]
         source: Box<dyn error::Error + Send + Sync>,
     },
+}
+
+/// A failure to remove temporary import audio.
+#[derive(Debug, thiserror::Error)]
+#[error("deleting import staging: {0}")]
+pub(crate) struct DeleteStagingError(#[from] Box<dyn error::Error + Send + Sync>);
+
+impl DeleteStagingError {
+    /// Preserves the cleanup failure's underlying cause.
+    pub(crate) fn new(source: impl error::Error + Send + Sync + 'static) -> Self {
+        Self(Box::new(source))
+    }
 }
 
 /// A storage enumeration failure that prevents a complete scan.
@@ -92,16 +104,23 @@ pub(crate) enum ReleaseScanFailure {
 /// Scans complete domain releases independently of physical storage representation.
 #[async_trait::async_trait]
 pub(crate) trait MusicStorage: Send + Sync {
-    /// Saves a release, skipping identities already present in storage.
+    /// Stages one validated audio under its release identity, consuming its bytes.
+    async fn stage_audio(&self, audio: ImportAudio) -> Result<(), SaveReleaseError>;
+
+    /// Publishes staged audio without overwriting an existing release.
     ///
-    /// Dry runs perform read-only checks and report success without writing.
-    /// Write permissions and available capacity are only verified by actual writes.
-    /// Atomicity depends on the adapter; best-effort storage may expose partial writes on failure.
-    async fn save_release(
+    /// Dry runs only check the destination and do not require staged audio.
+    /// Best-effort adapters may expose partial writes if publication fails.
+    async fn commit_release(
         &self,
-        release: &ImportRelease,
+        id: &ReleaseId,
         dry_run: bool,
     ) -> Result<SaveReleaseOutcome, SaveReleaseError>;
+
+    /// Deletes one release's staging area, or all staging areas when no identity is supplied.
+    ///
+    /// Missing staging areas are accepted; import executions sharing a destination must not overlap.
+    async fn delete_staging(&self, id: Option<&ReleaseId>) -> Result<(), DeleteStagingError>;
 
     /// Returns individual successes and failures separately from incomplete enumeration.
     async fn scan_releases(

@@ -33,7 +33,12 @@ tonhalle-backend import \
   --music-storage--root-path /path/to/storage
 ```
 
-All source candidates are read and validated before saving the valid releases.
+Audio is read and validated one file at a time, then staged under its release ID without accumulating audio bytes in memory.
+A release is published only after all of its audio passes validation and staging.
+After the first read, validation, or staging failure in a release, remaining audio is still checked but is not staged.
+Temporary audio is deleted after all candidates have been processed; cleanup failures make the command fail.
+Interrupted imports may leave temporary audio, which is cleared before staging that release again.
+Run only one import at a time against a destination.
 Existing releases are skipped without being overwritten.
 If a release fails, the remaining releases are still processed.
 The command prints `saved`, `skipped`, and `failed` counts and exits with a nonzero status if any release failed.
@@ -56,7 +61,8 @@ tonhalle-backend import-check \
 
 The command uses the same source reading and domain validation as `import`.
 It prints each valid release's ID and title, separated by a tab.
-When multiple source candidates have the same release ID, the first valid candidate is retained and later candidates are reported as failures by both `import-check` and `import`.
+Both `import-check` and `import` reserve a release ID when the first valid audio in a candidate identifies it.
+Later candidates with that ID fail as duplicates, even if the earlier candidate subsequently fails.
 If a release fails validation or cannot be read, the remaining releases are still checked and listed, and the command exits with a nonzero status.
 It does not check whether releases already exist at a destination.
 
@@ -165,13 +171,15 @@ Implementation-specific settings are required and validated only for the selecte
 | `TONHALLE_MUSIC_STORAGE__S3__PREFIX` | `--music-storage--s3--prefix` | `server`, `import` | No | Empty | Object-key prefix without leading/trailing slashes, empty segments, or `.` / `..` segments. |
 
 Credentials are loaded through the AWS SDK's standard credential provider chain, such as environment variables, shared AWS profiles, or IAM roles.
-The bucket must allow listing objects, reading audio for `server`, and writing audio for `import`.
+The bucket must allow listing objects, reading audio for `server`, and uploading, copying, and deleting temporary audio for `import` (including the read permission required for copying).
 
 Audio objects are stored at `{prefix}/{ReleaseId}/{AudioFileId}.{extension}`; an empty prefix omits the initial `{prefix}/`.
 Playback URLs append the complete object key to the configured playback URL base.
 For example, prefix `music` and base `https://example.com/` produce `https://example.com/music/{ReleaseId}/{AudioFileId}.{extension}`.
 Configure the delivery endpoint to serve those object keys.
 
+Temporary objects are stored at `{prefix}/.tonhalle-import/{ReleaseId}/{AudioFileId}.{extension}` and excluded from scans.
+Publication copies them to the regular release prefix, preserving their audio IDs and content types.
 S3 saves are best effort and use no management objects.
 Concurrent updates are not coordinated.
 A failed save may leave a partial release that is visible to scans.

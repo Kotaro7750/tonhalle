@@ -2,6 +2,7 @@
 
 use crate::domain::{
     id::ReleaseId,
+    import::{ImportAudio, ImportValidationError, ImportedReleaseValidator},
     ingestion::metadata::RawMetadata,
     primitive::{
         audio_file::{AudioFile, AudioProperties, MediaType},
@@ -20,6 +21,22 @@ pub(crate) fn release_metadata(
         raw.release_credit().names(),
         raw.release_credit().mbids(),
     )
+}
+
+/// Validates test sources through the incremental import path.
+pub(crate) fn validate_import_release(
+    sources: Vec<Vec<u8>>,
+) -> Result<ReleaseMetadata, ImportValidationError> {
+    let mut builder = ImportedReleaseValidator::default();
+    for bytes in sources {
+        builder.push(bytes)?;
+    }
+    builder.finish()
+}
+
+/// Creates staging audio through the release validator.
+pub(crate) fn sample_import_audio(bytes: Vec<u8>) -> ImportAudio {
+    ImportedReleaseValidator::default().push(bytes).unwrap()
 }
 
 /// Creates valid storage information without parsing audio.

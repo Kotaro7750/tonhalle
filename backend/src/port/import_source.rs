@@ -58,9 +58,10 @@ impl ImportCandidate {
 }
 
 /// Provides candidates and bytes from independent read-only storage.
+#[async_trait::async_trait]
 pub(crate) trait ImportSource: Send + Sync {
     /// Enumerates release groupings within the configured scope.
-    fn list_releases(&self) -> Result<Vec<ImportCandidate>, ListImportReleasesError>;
+    async fn list_releases(&self) -> Result<Vec<ImportCandidate>, ListImportReleasesError>;
     /// Reads the original audio bytes using an opaque locator.
-    fn read_audio(&self, key: &str) -> Result<Vec<u8>, ReadImportAudioError>;
+    async fn read_audio(&self, key: &str) -> Result<Vec<u8>, ReadImportAudioError>;
 }
