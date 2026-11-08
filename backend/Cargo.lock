@@ -4114,6 +4114,7 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "clap",
+ "futures-util",
  "getset",
  "hex",
  "itertools",

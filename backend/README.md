@@ -14,7 +14,9 @@ tonhalle-backend server \
   --music-storage--playback-url-base https://example.com/audio/
 ```
 
-The server builds the metadata index from stored audio at startup.
+The server accepts requests while scanning stored audio in the background.
+Validated releases become available as they are indexed, so listings may be incomplete during the scan.
+Rejected releases are logged and skipped; a scan failure leaves already indexed releases available.
 Audio is delivered through a separate HTTP endpoint.
 
 The container starts the `server` subcommand by default.

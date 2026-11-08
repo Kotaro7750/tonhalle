@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use std::error;
 
 use crate::domain::{
-    id::{ReleaseId, TrackId},
+    id::{AudioFileId, ReleaseId, TrackId},
     primitive::{release::Release, track::Track},
 };
 
@@ -62,9 +62,39 @@ pub(crate) enum GetTrackError {
     Internal(#[from] Box<dyn error::Error + Send + Sync>),
 }
 
+/// A rejected addition or an index write failure.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum AddReleaseError {
+    /// A release identity must identify one complete release in the collection.
+    #[error("duplicate release identity: {id}")]
+    DuplicateRelease { id: ReleaseId },
+    /// A track identity cannot belong to different releases.
+    #[error("track {track_id} belongs to both {first_release_id} and {release_id}")]
+    SharedTrack {
+        track_id: TrackId,
+        first_release_id: ReleaseId,
+        release_id: ReleaseId,
+    },
+    /// A stored audio identity cannot belong to different releases.
+    #[error("audio file {id} belongs to both {first_release_id} and {release_id}")]
+    SharedAudioFile {
+        id: AudioFileId,
+        first_release_id: ReleaseId,
+        release_id: ReleaseId,
+    },
+    /// The index could not perform the write.
+    #[error("adding release: {0}")]
+    Internal(#[from] Box<dyn error::Error + Send + Sync>),
+}
+
 /// Provides asynchronous browsing of accepted music entities.
 #[async_trait]
 pub(crate) trait MetadataIndex: Send + Sync {
+    /// Validates against existing entities and atomically adds a complete release.
+    ///
+    /// Concurrent reads and writes are supported; rejected additions leave the index unchanged.
+    async fn add_release(&self, release: Release) -> Result<(), AddReleaseError>;
+
     /// Reads releases in identifier order after an optional continuation token.
     async fn list_releases(
         &self,

@@ -3,44 +3,44 @@
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     ops::Bound::{Excluded, Unbounded},
+    sync::RwLock,
 };
 
 use crate::{
     domain::{
-        id::{ReleaseId, TrackId},
+        id::{AudioFileId, ReleaseId, TrackId},
         primitive::{release::Release, track::Track},
     },
     port::metadata_index::{
-        GetReleaseError, GetTrackError, ListReleasesError, MetadataIndex, ReleasePage,
+        AddReleaseError, GetReleaseError, GetTrackError, ListReleasesError, MetadataIndex,
+        ReleasePage,
     },
 };
 
-/// An identifier-ordered snapshot of accepted releases and tracks.
+/// A concurrently readable index of accepted releases.
+#[derive(Default)]
 pub(crate) struct InMemoryMetadataIndex {
+    state: RwLock<IndexState>,
+}
+
+/// Owns releases and lookup positions under one lock.
+#[derive(Default)]
+struct IndexState {
     releases: BTreeMap<ReleaseId, Release>,
-    tracks: BTreeMap<TrackId, Track>,
+    tracks: BTreeMap<TrackId, (ReleaseId, usize)>,
+    audio: HashMap<AudioFileId, ReleaseId>,
 }
 
 impl InMemoryMetadataIndex {
-    /// Indexes accepted entities for release browsing and direct track lookup.
-    pub(crate) fn new(releases: Vec<Release>) -> Self {
-        let tracks = releases
-            .iter()
-            .flat_map(|release| release.tracks().iter())
-            .map(|track| (track.id().to_owned(), track.clone()))
-            .collect();
-
-        Self {
-            releases: releases
-                .into_iter()
-                .map(|release| (release.id().to_owned(), release))
-                .collect(),
-            tracks,
-        }
+    /// Creates an empty index for incremental construction.
+    pub(crate) fn new() -> Self {
+        Self::default()
     }
+}
 
+impl IndexState {
     /// Accepts a versioned continuation token only when its release is in this index.
     fn decode_cursor(&self, cursor: String) -> Result<ReleaseId, ListReleasesError> {
         let bytes = URL_SAFE_NO_PAD
@@ -64,18 +64,55 @@ impl InMemoryMetadataIndex {
 
 #[async_trait]
 impl MetadataIndex for InMemoryMetadataIndex {
+    async fn add_release(&self, release: Release) -> Result<(), AddReleaseError> {
+        let mut state = self.state.write().unwrap();
+        if state.releases.contains_key(release.id()) {
+            return Err(AddReleaseError::DuplicateRelease {
+                id: release.id().clone(),
+            });
+        }
+        for track in release.tracks() {
+            if let Some((owner, _)) = state.tracks.get(track.id()) {
+                return Err(AddReleaseError::SharedTrack {
+                    track_id: track.id().clone(),
+                    first_release_id: owner.clone(),
+                    release_id: release.id().clone(),
+                });
+            }
+            let id = track.original_audio_file().id();
+            if let Some(owner) = state.audio.get(&id) {
+                return Err(AddReleaseError::SharedAudioFile {
+                    id,
+                    first_release_id: owner.clone(),
+                    release_id: release.id().clone(),
+                });
+            }
+        }
+        for (position, track) in release.tracks().iter().enumerate() {
+            state
+                .tracks
+                .insert(track.id().clone(), (release.id().clone(), position));
+            state
+                .audio
+                .insert(track.original_audio_file().id(), release.id().clone());
+        }
+        state.releases.insert(release.id().clone(), release);
+        Ok(())
+    }
+
     /// Reads an identifier-ordered page and encodes its continuation position.
     async fn list_releases(
         &self,
         limit: u8,
         cursor: Option<String>,
     ) -> Result<ReleasePage, ListReleasesError> {
+        let state = self.state.read().unwrap();
         let cursor = cursor
-            .map(|cursor| self.decode_cursor(cursor))
+            .map(|cursor| state.decode_cursor(cursor))
             .transpose()?;
         let start = cursor.as_ref().map_or(Unbounded, Excluded);
 
-        let mut items = self
+        let mut items = state
             .releases
             .range::<ReleaseId, _>((start, Unbounded))
             .take(usize::from(limit) + 1)
@@ -96,7 +133,10 @@ impl MetadataIndex for InMemoryMetadataIndex {
 
     /// Looks up an accepted release in the startup snapshot.
     async fn get_release(&self, id: &ReleaseId) -> Result<Release, GetReleaseError> {
-        self.releases
+        self.state
+            .read()
+            .unwrap()
+            .releases
             .get(id)
             .cloned()
             .ok_or(GetReleaseError::NotFound)
@@ -104,7 +144,9 @@ impl MetadataIndex for InMemoryMetadataIndex {
 
     /// Looks up an accepted track in the startup snapshot.
     async fn get_track(&self, id: &TrackId) -> Result<Track, GetTrackError> {
-        self.tracks.get(id).cloned().ok_or(GetTrackError::NotFound)
+        let state = self.state.read().unwrap();
+        let (release, position) = state.tracks.get(id).ok_or(GetTrackError::NotFound)?;
+        Ok(state.releases[release].tracks()[*position].clone())
     }
 }
 
@@ -112,7 +154,62 @@ impl MetadataIndex for InMemoryMetadataIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{domain::ingestion::metadata::sample_metadata, test_support::sample_release};
+    use crate::{
+        domain::ingestion::metadata::sample_metadata,
+        test_support::{sample_release, sample_release_with_audio_id},
+    };
+
+    async fn index_with(releases: Vec<Release>) -> InMemoryMetadataIndex {
+        let index = InMemoryMetadataIndex::new();
+        for release in releases {
+            index.add_release(release).await.unwrap();
+        }
+        index
+    }
+
+    #[tokio::test]
+    async fn add_release_rejects_shared_audio_without_partial_registration() {
+        let first = releases().remove(0);
+        let mut raw = sample_metadata();
+        *raw.release_title_mut() = "Conflicting release".into();
+        let second = sample_release(&raw);
+        let index = index_with(vec![first.clone()]).await;
+        assert!(matches!(
+            index.add_release(second.clone()).await,
+            Err(AddReleaseError::SharedAudioFile { .. })
+        ));
+        assert!(matches!(
+            index.get_release(second.id()).await,
+            Err(GetReleaseError::NotFound)
+        ));
+        assert!(matches!(
+            index.get_track(second.tracks()[0].id()).await,
+            Err(GetTrackError::NotFound)
+        ));
+        assert_eq!(
+            index.list_releases(100, None).await.unwrap().items().len(),
+            1
+        );
+        assert_eq!(
+            index.get_track(first.tracks()[0].id()).await.unwrap().id(),
+            first.tracks()[0].id()
+        );
+    }
+
+    #[tokio::test]
+    async fn add_release_allows_only_one_concurrent_registration_of_an_identity() {
+        let index = InMemoryMetadataIndex::new();
+        let release = releases().remove(0);
+        let (first, second) = tokio::join!(
+            index.add_release(release.clone()),
+            index.add_release(release)
+        );
+        assert_ne!(first.is_ok(), second.is_ok());
+        assert_eq!(
+            index.list_releases(100, None).await.unwrap().items().len(),
+            1
+        );
+    }
 
     /// Builds distinct releases without parsing audio files.
     fn releases() -> Vec<Release> {
@@ -120,14 +217,19 @@ mod tests {
             .map(|i| {
                 let mut fixture = sample_metadata();
                 *fixture.release_title_mut() = format!("Release {i}");
-                sample_release(&fixture)
+                sample_release_with_audio_id(
+                    &fixture,
+                    format!("2f1c75fc-55de-4d4b-8992-76050f65dff{i}")
+                        .parse()
+                        .unwrap(),
+                )
             })
             .collect()
     }
 
     #[tokio::test]
     async fn list_releases_preserves_order_and_resumes_without_duplicates_when_limit_changes() {
-        let index = InMemoryMetadataIndex::new(releases());
+        let index = index_with(releases()).await;
         let all = index.list_releases(100, None).await.unwrap();
         assert!(
             all.items()
@@ -170,7 +272,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_releases_rejects_malformed_and_unknown_cursor_positions() {
-        let index = InMemoryMetadataIndex::new(releases());
+        let index = index_with(releases()).await;
         for cursor in [
             "invalid".to_owned(),
             URL_SAFE_NO_PAD.encode("wrong-version"),
@@ -190,7 +292,7 @@ mod tests {
     #[tokio::test]
     async fn metadata_index_returns_empty_pages_and_not_found_for_absent_entities() {
         let release = releases().remove(0);
-        let index = InMemoryMetadataIndex::new(vec![]);
+        let index = InMemoryMetadataIndex::new();
         let page = index.list_releases(30, None).await.unwrap();
         assert!(page.items().is_empty());
         assert!(page.next_cursor().is_none());
@@ -207,7 +309,7 @@ mod tests {
     #[tokio::test]
     async fn metadata_index_looks_up_the_requested_release_and_track() {
         let releases = releases();
-        let index = InMemoryMetadataIndex::new(releases.clone());
+        let index = index_with(releases.clone()).await;
         for release in releases {
             assert_eq!(
                 index.get_release(release.id()).await.unwrap().id(),

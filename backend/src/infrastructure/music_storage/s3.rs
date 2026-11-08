@@ -8,6 +8,10 @@ use aws_sdk_s3::{
     },
     primitives::{ByteStream, ByteStreamError},
 };
+use futures_util::{
+    StreamExt,
+    stream::{self, BoxStream},
+};
 use std::collections::BTreeMap;
 use tokio::task::spawn_blocking;
 use url::Url;
@@ -360,54 +364,62 @@ impl MusicStorage for S3MusicStorage {
         Ok(())
     }
 
-    async fn scan_releases(
+    fn scan_releases(
         &self,
-    ) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError> {
-        // Enumerate every page before scanning releases, since one release may span multiple pages.
-        let prefix = self.key("");
-        let mut pages = self
-            .client
-            .list_objects_v2()
-            .bucket(&self.bucket)
-            .prefix(&prefix)
-            .into_paginator()
-            .send();
-        let mut groups = BTreeMap::<String, Vec<String>>::new();
-        while let Some(page) = pages.next().await {
-            let page = page.map_err(ScanReleasesError::new)?;
-            // Group only supported audio at the expected release/filename depth within the configured prefix.
-            for object in page.contents() {
-                let Some(key) = object.key() else { continue };
-                let Some((release, filename)) = key
-                    .strip_prefix(&prefix)
-                    .and_then(|key| key.split_once('/'))
-                else {
-                    continue;
-                };
-                if filename.contains('/')
-                    || filename
-                        .rsplit_once('.')
-                        .and_then(|(_, extension)| MediaType::from_extension(extension))
-                        .is_none()
-                {
-                    continue;
-                }
-                groups.entry(release.into()).or_default().push(key.into());
-            }
-        }
+    ) -> BoxStream<'_, Result<Result<Release, ReleaseScanFailure>, ScanReleasesError>> {
+        stream::try_unfold(None, move |state| async move {
+            let mut groups = match state {
+                Some(groups) => groups,
+                None => {
+                    // Enumerate every page before scanning releases, since one release may span multiple pages.
+                    let prefix = self.key("");
+                    let mut pages = self
+                        .client
+                        .list_objects_v2()
+                        .bucket(&self.bucket)
+                        .prefix(&prefix)
+                        .into_paginator()
+                        .send();
+                    let mut groups = BTreeMap::<String, Vec<String>>::new();
+                    while let Some(page) = pages.next().await {
+                        let page = page.map_err(ScanReleasesError::new)?;
+                        // Group only supported audio at the expected release/filename depth within the configured prefix.
+                        for object in page.contents() {
+                            let Some(key) = object.key() else { continue };
+                            let Some((release, filename)) = key
+                                .strip_prefix(&prefix)
+                                .and_then(|key| key.split_once('/'))
+                            else {
+                                continue;
+                            };
+                            if filename.contains('/')
+                                || filename
+                                    .rsplit_once('.')
+                                    .and_then(|(_, extension)| MediaType::from_extension(extension))
+                                    .is_none()
+                            {
+                                continue;
+                            }
+                            groups.entry(release.into()).or_default().push(key.into());
+                        }
+                    }
 
-        // Resolve each stored release identity and retain per-release failures alongside successful scans.
-        let mut releases = Vec::new();
-        for (stem, keys) in groups {
-            match stem.parse() {
-                Ok(id) => releases.push(self.scan_release(id, keys).await),
-                Err(source) => releases.push(Err(ReleaseScanFailure::InvalidId {
+                    groups.into_iter()
+                }
+            };
+            let Some((stem, keys)) = groups.next() else {
+                return Ok(None);
+            };
+            let result = match stem.parse() {
+                Ok(id) => self.scan_release(id, keys).await,
+                Err(source) => Err(ReleaseScanFailure::InvalidId {
                     object_key: self.key(&stem),
                     source,
-                })),
-            }
-        }
-        Ok(releases)
+                }),
+            };
+            Ok(Some((result, Some(groups))))
+        })
+        .boxed()
     }
 }
 
@@ -425,6 +437,7 @@ mod tests {
         types::Object,
     };
     use aws_smithy_mocks::{MockResponse, RuleMode, mock, mock_client};
+    use futures_util::TryStreamExt;
     use std::{
         collections::BTreeMap,
         sync::{Arc, Mutex},
@@ -534,7 +547,14 @@ mod tests {
                     .unwrap();
             }
             assert_eq!(objects.lock().unwrap().len(), 2);
-            assert!(storage.scan_releases().await.unwrap().is_empty());
+            assert!(
+                storage
+                    .scan_releases()
+                    .try_collect::<Vec<_>>()
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
             assert_eq!(
                 storage.commit_release(release.id(), false).await.unwrap(),
                 SaveReleaseOutcome::Saved
@@ -561,6 +581,7 @@ mod tests {
             assert_eq!(*objects.lock().unwrap(), snapshot);
             let scanned = storage
                 .scan_releases()
+                .try_collect::<Vec<_>>()
                 .await
                 .unwrap()
                 .pop()
@@ -594,6 +615,7 @@ mod tests {
         assert_eq!(objects.lock().unwrap().len(), 1);
         let scanned = storage
             .scan_releases()
+            .try_collect::<Vec<_>>()
             .await
             .unwrap()
             .pop()
@@ -695,7 +717,11 @@ mod tests {
         });
         let client = mock_client!(aws_sdk_s3, RuleMode::MatchAny, [&first, &second, &get]);
         let storage = storage(client);
-        let results = storage.scan_releases().await.unwrap();
+        let results = storage
+            .scan_releases()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
         assert_eq!(results.len(), 2);
         assert!(
             results
@@ -729,6 +755,12 @@ mod tests {
             });
         let client = mock_client!(aws_sdk_s3, RuleMode::MatchAny, [&first, &second]);
         let storage = storage(client);
-        assert!(storage.scan_releases().await.is_err());
+        assert!(
+            storage
+                .scan_releases()
+                .try_collect::<Vec<_>>()
+                .await
+                .is_err()
+        );
     }
 }

@@ -1,5 +1,6 @@
 //! Defines release-level music storage operations and their outcomes.
 
+use futures_util::stream::BoxStream;
 use std::error;
 
 use crate::domain::{
@@ -122,8 +123,8 @@ pub(crate) trait MusicStorage: Send + Sync {
     /// Missing staging areas are accepted; import executions sharing a destination must not overlap.
     async fn delete_staging(&self, id: Option<&ReleaseId>) -> Result<(), DeleteStagingError>;
 
-    /// Returns individual successes and failures separately from incomplete enumeration.
-    async fn scan_releases(
+    /// Streams release outcomes; a fatal enumeration failure ends the stream.
+    fn scan_releases(
         &self,
-    ) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError>;
+    ) -> BoxStream<'_, Result<Result<Release, ReleaseScanFailure>, ScanReleasesError>>;
 }

@@ -1,5 +1,13 @@
 //! Reads and persists complete releases using filesystem storage.
 
+use futures_util::{
+    StreamExt,
+    stream::{self, BoxStream},
+};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::{
     collections::BTreeMap,
     fs::{File, OpenOptions, create_dir_all, read, rename, symlink_metadata},
@@ -191,11 +199,15 @@ impl FileSystemMusicStorage {
         &self,
         id: ReleaseId,
         audio_files: Vec<PathBuf>,
+        cancelled: &AtomicBool,
     ) -> Result<Release, ReleaseScanFailure> {
         let mut tracks = Vec::new();
         let mut failures = Vec::new();
 
         for path in audio_files {
+            if cancelled.load(Ordering::Relaxed) {
+                break;
+            }
             let object_key = path
                 .strip_prefix(&self.root_path)
                 .unwrap()
@@ -337,9 +349,7 @@ impl FileSystemMusicStorage {
     }
 
     /// Groups audio paths by their stored release directory and constructs domain releases.
-    fn scan_releases_blocking(
-        &self,
-    ) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError> {
+    fn enumerate_releases_blocking(&self) -> Result<Vec<ReleaseCandidate>, ScanReleasesError> {
         let mut groups: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
 
         // Do not follow symlinks outside the configured read-only content root.
@@ -392,11 +402,7 @@ impl FileSystemMusicStorage {
             }
         }
 
-        results.extend(
-            releases
-                .into_iter()
-                .map(|(id, audio_files)| self.scan_release(id, audio_files)),
-        );
+        results.extend(releases.into_iter().map(Ok));
 
         Ok(results)
     }
@@ -449,13 +455,54 @@ impl MusicStorage for FileSystemMusicStorage {
             .map_err(DeleteStagingError::new)
     }
 
-    async fn scan_releases(
+    fn scan_releases(
         &self,
-    ) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError> {
-        let storage = self.clone();
-        spawn_blocking(move || storage.scan_releases_blocking())
-            .await
-            .map_err(ScanReleasesError::new)?
+    ) -> BoxStream<'_, Result<Result<Release, ReleaseScanFailure>, ScanReleasesError>> {
+        let cancellation = ScanCancellation(Arc::new(AtomicBool::new(false)));
+        stream::try_unfold(
+            (None, cancellation),
+            move |(state, cancellation)| async move {
+                let mut releases = match state {
+                    Some(releases) => releases,
+                    None => {
+                        let storage = self.clone();
+                        spawn_blocking(move || storage.enumerate_releases_blocking())
+                            .await
+                            .map_err(ScanReleasesError::new)??
+                            .into_iter()
+                    }
+                };
+                let Some(candidate) = releases.next() else {
+                    return Ok(None);
+                };
+                let result = match candidate {
+                    Err(failure) => Err(failure),
+                    Ok((id, paths)) => {
+                        let storage = self.clone();
+                        {
+                            let cancelled = cancellation.0.clone();
+                            spawn_blocking(move || storage.scan_release(id, paths, &cancelled))
+                        }
+                        .await
+                        .map_err(ScanReleasesError::new)?
+                    }
+                };
+                Ok(Some((result, (Some(releases), cancellation))))
+            },
+        )
+        .boxed()
+    }
+}
+
+/// A grouped release path set or a rejected directory identity.
+type ReleaseCandidate = Result<(ReleaseId, Vec<PathBuf>), ReleaseScanFailure>;
+
+/// Stops blocking scan work between files when its stream is dropped.
+struct ScanCancellation(Arc<AtomicBool>);
+
+impl Drop for ScanCancellation {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
     }
 }
 
@@ -479,6 +526,7 @@ enum FileSystemSaveReleaseError {
 /// Verifies filesystem storage through its scanning and saving contracts.
 #[cfg(test)]
 mod tests {
+    use futures_util::TryStreamExt;
     use std::{
         error::Error,
         fs::{create_dir, create_dir_all, read, remove_dir, write},
@@ -566,6 +614,7 @@ mod tests {
         for _ in 0..2 {
             let release = storage(temp.path())
                 .scan_releases()
+                .try_collect::<Vec<_>>()
                 .await
                 .unwrap()
                 .pop()
@@ -600,6 +649,7 @@ mod tests {
 
         let result = storage(temp.path())
             .scan_releases()
+            .try_collect::<Vec<_>>()
             .await
             .unwrap()
             .pop()
@@ -635,7 +685,11 @@ mod tests {
         .unwrap();
         write_audio_with_id(temp.path(), &different, audio_id);
 
-        let mut results = storage(temp.path()).scan_releases().await.unwrap();
+        let mut results = storage(temp.path())
+            .scan_releases()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
 
         assert_eq!(results.len(), 2);
         assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
@@ -685,6 +739,7 @@ mod tests {
 
         let failure = storage(temp.path())
             .scan_releases()
+            .try_collect::<Vec<_>>()
             .await
             .unwrap()
             .pop()
@@ -706,6 +761,7 @@ mod tests {
 
         let failure = storage(empty.path())
             .scan_releases()
+            .try_collect::<Vec<_>>()
             .await
             .unwrap()
             .pop()
@@ -729,7 +785,11 @@ mod tests {
 
         let second_path = write_audio_with_id(&temp.path().join("b"), &other, audio_id);
 
-        let mut results = storage(temp.path()).scan_releases().await.unwrap();
+        let mut results = storage(temp.path())
+            .scan_releases()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results.pop().unwrap().unwrap().tracks().len(), 2);
@@ -743,7 +803,11 @@ mod tests {
         )
         .unwrap();
 
-        let mut results = storage(temp.path()).scan_releases().await.unwrap();
+        let mut results = storage(temp.path())
+            .scan_releases()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
 
         assert_eq!(results.len(), 1);
 
@@ -763,7 +827,13 @@ mod tests {
 
         remove_dir(&root).unwrap();
 
-        assert!(storage.scan_releases().await.is_err());
+        assert!(
+            storage
+                .scan_releases()
+                .try_collect::<Vec<_>>()
+                .await
+                .is_err()
+        );
     }
 
     #[cfg(unix)]
@@ -785,6 +855,7 @@ mod tests {
 
         let failure = storage(temp.path())
             .scan_releases()
+            .try_collect::<Vec<_>>()
             .await
             .unwrap()
             .pop()
@@ -813,7 +884,14 @@ mod tests {
                 .await
                 .unwrap();
         }
-        assert!(storage.scan_releases().await.unwrap().is_empty());
+        assert!(
+            storage
+                .scan_releases()
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             storage.commit_release(release.id(), false).await.unwrap(),
             SaveReleaseOutcome::Saved
@@ -936,6 +1014,7 @@ mod tests {
         assert!(
             storage(root.path())
                 .scan_releases()
+                .try_collect::<Vec<_>>()
                 .await
                 .unwrap()
                 .is_empty()

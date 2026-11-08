@@ -78,6 +78,22 @@ pub(crate) fn sample_release(raw: &RawMetadata) -> Release {
     .unwrap()
 }
 
+/// Builds a release with a distinct stored audio identity for cross-release tests.
+pub(crate) fn sample_release_with_audio_id(
+    raw: &RawMetadata,
+    audio_id: crate::domain::id::AudioFileId,
+) -> Release {
+    let id = release_metadata(raw).unwrap().id().clone();
+    let source = sample_audio_file();
+    let audio = AudioFile::from_properties(
+        audio_id,
+        source.object_key().into(),
+        source.playback_url().clone(),
+        AudioProperties::new(MediaType::Wav, 44100, Some(16), 2, Some(1411200)).unwrap(),
+    );
+    Release::new(id.clone(), vec![sample_track(raw, &id, audio)]).unwrap()
+}
+
 /// Encodes source metadata in WAV bytes to exercise the production ingestion boundary.
 pub(crate) fn sample_audio(source: &RawMetadata) -> Vec<u8> {
     sample_audio_with_mbids(source, None, None)

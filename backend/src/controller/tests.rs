@@ -124,6 +124,10 @@ impl FixtureIndex {
 
 #[async_trait]
 impl MetadataIndex for FixtureIndex {
+    async fn add_release(&self, _: Release) -> Result<(), metadata_index::AddReleaseError> {
+        panic!("read-only fixture")
+    }
+
     /// Exposes a fixed page while checking HTTP argument interpretation.
     async fn list_releases(
         &self,
@@ -282,6 +286,10 @@ struct FailingIndex;
 
 #[async_trait]
 impl MetadataIndex for FailingIndex {
+    async fn add_release(&self, _: Release) -> Result<(), metadata_index::AddReleaseError> {
+        panic!("read-only fixture")
+    }
+
     /// Simulates an internal listing failure with private infrastructure details.
     async fn list_releases(
         &self,

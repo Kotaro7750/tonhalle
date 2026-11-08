@@ -1,8 +1,8 @@
-//! Defines releases and validates their metadata, membership, original audio selection, and cross-release identities.
+//! Defines releases and validates their metadata, membership, and original audio selection.
 
 use chrono::NaiveDate;
 use serde_json::json;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::domain::{
     artist_credit::{ArtistCredit, ArtistCreditValidationError, artist_credits},
@@ -88,28 +88,6 @@ pub(crate) enum ReleaseValidationError {
     DuplicateAudioFile { id: AudioFileId },
 }
 
-/// An identity conflict between otherwise valid releases.
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum ReleasesValidationError {
-    /// A release identity must identify one complete release in the collection.
-    #[error("duplicate release identity: {id}")]
-    DuplicateRelease { id: ReleaseId },
-    /// A track identity cannot belong to different releases.
-    #[error("track {track_id} belongs to both {first_release_id} and {release_id}")]
-    SharedTrack {
-        track_id: TrackId,
-        first_release_id: ReleaseId,
-        release_id: ReleaseId,
-    },
-    /// A stored audio identity cannot belong to different releases.
-    #[error("audio file {id} belongs to both {first_release_id} and {release_id}")]
-    SharedAudioFile {
-        id: AudioFileId,
-        first_release_id: ReleaseId,
-        release_id: ReleaseId,
-    },
-}
-
 /// A release with its tracks ordered for display.
 #[derive(getset::Getters, Debug, Clone)]
 pub(crate) struct Release {
@@ -184,43 +162,6 @@ impl Release {
     }
 }
 
-/// Rejects shared release, track, and audio identities without dropping valid entities silently.
-pub(crate) fn validate_releases(releases: &[Release]) -> Result<(), ReleasesValidationError> {
-    let mut seen_releases = HashSet::new();
-    let mut seen_tracks = HashMap::new();
-    let mut seen_audio_files = HashMap::new();
-
-    for release in releases {
-        if !seen_releases.insert(release.id()) {
-            return Err(ReleasesValidationError::DuplicateRelease {
-                id: release.id().clone(),
-            });
-        }
-
-        for track in release.tracks() {
-            if let Some(first_release_id) = seen_tracks.insert(track.id(), release.id()) {
-                return Err(ReleasesValidationError::SharedTrack {
-                    track_id: track.id().clone(),
-                    first_release_id: first_release_id.clone(),
-                    release_id: release.id().clone(),
-                });
-            }
-
-            if let Some(first_release_id) =
-                seen_audio_files.insert(track.original_audio_file().id(), release.id())
-            {
-                return Err(ReleasesValidationError::SharedAudioFile {
-                    id: track.original_audio_file().id(),
-                    first_release_id: first_release_id.clone(),
-                    release_id: release.id().clone(),
-                });
-            }
-        }
-    }
-
-    Ok(())
-}
-
 /// Checks calendar validity without filling missing date components.
 fn validate_release_date(value: &str) -> Result<(), ReleaseMetadataValidationError> {
     let expanded = match value.len() {
@@ -254,7 +195,7 @@ mod tests {
             ingestion::metadata::sample_metadata,
             primitive::audio_file::{AudioFile, AudioProperties, MediaType},
         },
-        test_support::{release_metadata, sample_audio_file, sample_release, sample_track},
+        test_support::{release_metadata, sample_audio_file, sample_track},
     };
 
     #[test]
@@ -456,37 +397,5 @@ mod tests {
                 ArtistCreditValidationError::MissingName
             ))
         ));
-    }
-
-    #[test]
-    fn validate_releases_rejects_duplicate_releases_and_shared_audio_files() {
-        let source = sample_metadata();
-        let first = sample_release(&source);
-
-        assert!(matches!(
-            validate_releases(&[first.clone(), first.clone()]),
-            Err(ReleasesValidationError::DuplicateRelease { .. })
-        ));
-
-        let mut other = source.clone();
-        other.release_title_mut().push_str(" Other");
-
-        assert!(matches!(
-            validate_releases(&[first.clone(), sample_release(&other)]),
-            Err(ReleasesValidationError::SharedAudioFile { .. })
-        ));
-
-        let audio_id = "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap();
-        let audio = sample_audio_file();
-        let id = release_metadata(&other).unwrap().id().clone();
-        let audio = AudioFile::from_properties(
-            audio_id,
-            audio.object_key().into(),
-            audio.playback_url().clone(),
-            AudioProperties::new(MediaType::Wav, 44100, Some(16), 2, Some(1411200)).unwrap(),
-        );
-        let second = Release::new(id.clone(), vec![sample_track(&other, &id, audio)]).unwrap();
-
-        assert!(validate_releases(&[first.clone(), second.clone()]).is_ok());
     }
 }

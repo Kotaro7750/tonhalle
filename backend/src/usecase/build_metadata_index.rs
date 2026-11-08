@@ -1,54 +1,60 @@
-//! Builds the startup index from storage releases after domain consistency validation.
+//! Incrementally registers accepted storage releases in the shared metadata index.
 
+use futures_util::StreamExt;
 use std::sync::Arc;
-use tokio::task::{JoinError, spawn_blocking};
 
-use crate::{
-    domain::primitive::release::{Release, ReleasesValidationError, validate_releases},
-    port::music_storage::{MusicStorage, ScanReleasesError},
+use crate::port::{
+    metadata_index::{AddReleaseError, MetadataIndex},
+    music_storage::{MusicStorage, ScanReleasesError},
 };
 
-/// A fatal scan or consistency failure that prevents startup index construction.
+/// A fatal enumeration or index infrastructure failure.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum BuildMetadataIndexError {
-    /// The domain consistency validation worker failed.
-    #[error(transparent)]
-    Worker(#[from] JoinError),
-    /// Storage enumeration did not complete.
+    /// Storage enumeration could not continue.
     #[error(transparent)]
     Scan(#[from] ScanReleasesError),
-    /// Accepted releases contain conflicting entity identities.
+    /// The index could not accept writes.
     #[error(transparent)]
-    InconsistentReleases(#[from] ReleasesValidationError),
+    Index(#[from] AddReleaseError),
 }
 
-/// Obtains valid storage releases for startup indexing.
+/// Scans releases and publishes each independently validated addition.
 pub(crate) struct BuildMetadataIndexUseCase {
     storage: Arc<dyn MusicStorage>,
+    index: Arc<dyn MetadataIndex>,
 }
 
 impl BuildMetadataIndexUseCase {
-    /// Connects startup indexing to its read-only music-storage port.
-    pub(crate) fn new(storage: Arc<dyn MusicStorage>) -> Self {
-        Self { storage }
+    /// Connects the source storage and shared destination index.
+    pub(crate) fn new(storage: Arc<dyn MusicStorage>, index: Arc<dyn MetadataIndex>) -> Self {
+        Self { storage, index }
     }
 
-    /// Reports individual scan failures and validates the accepted collection through Domain.
-    pub(crate) async fn execute(&self) -> Result<Vec<Release>, BuildMetadataIndexError> {
-        let mut releases = Vec::new();
-
-        for result in self.storage.scan_releases().await? {
-            match result {
-                Ok(release) => releases.push(release),
-                Err(failure) => tracing::warn!(?failure, "Storage release rejected"),
+    /// Continues past rejected releases while propagating failures that prevent further scanning.
+    pub(crate) async fn execute(&self) -> Result<(), BuildMetadataIndexError> {
+        let mut releases = self.storage.scan_releases();
+        while let Some(result) = releases.next().await {
+            let release = match result? {
+                Ok(release) => release,
+                Err(failure) => {
+                    tracing::warn!(?failure, "Storage release rejected");
+                    continue;
+                }
+            };
+            match self.index.add_release(release).await {
+                Ok(()) => {}
+                Err(
+                    error @ (AddReleaseError::DuplicateRelease { .. }
+                    | AddReleaseError::SharedTrack { .. }
+                    | AddReleaseError::SharedAudioFile { .. }),
+                ) => {
+                    tracing::warn!(?error, "Index release rejected")
+                }
+                Err(error @ AddReleaseError::Internal(_)) => return Err(error.into()),
             }
         }
-
-        spawn_blocking(move || {
-            validate_releases(&releases)?;
-            Ok(releases)
-        })
-        .await?
+        Ok(())
     }
 }
 
@@ -62,12 +68,14 @@ mod tests {
     };
 
     use super::*;
+    use crate::domain::primitive::release::Release;
+    use crate::infrastructure::metadata_index::InMemoryMetadataIndex;
     use crate::{
         domain::{id::ReleaseId, import::ImportAudio, ingestion::metadata::sample_metadata},
         port::music_storage::{
             DeleteStagingError, ReleaseScanFailure, SaveReleaseError, SaveReleaseOutcome,
         },
-        test_support::sample_release,
+        test_support::{sample_release, sample_release_with_audio_id},
     };
 
     /// Simulates a fatal storage enumeration failure.
@@ -93,18 +101,24 @@ mod tests {
         }
 
         /// Returns an I/O failure before individual release results are available.
-        async fn scan_releases(
+        fn scan_releases(
             &self,
-        ) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError> {
-            Err(ScanReleasesError::new(IoError::new(
-                ErrorKind::PermissionDenied,
-                "content directory is not readable",
-            )))
+        ) -> futures_util::stream::BoxStream<
+            '_,
+            Result<Result<Release, ReleaseScanFailure>, ScanReleasesError>,
+        > {
+            futures_util::stream::once(async {
+                Err(ScanReleasesError::new(IoError::new(
+                    ErrorKind::PermissionDenied,
+                    "content directory is not readable",
+                )))
+            })
+            .boxed()
         }
     }
 
     /// Supplies accepted releases alongside an individual storage scan failure.
-    struct FixtureStorage(Vec<Release>);
+    struct FixtureStorage(Vec<Release>, Option<Arc<tokio::sync::Notify>>);
 
     #[async_trait::async_trait]
     impl MusicStorage for FixtureStorage {
@@ -126,9 +140,12 @@ mod tests {
         }
 
         /// Preserves accepted releases while reporting an independently rejected storage key.
-        async fn scan_releases(
+        fn scan_releases(
             &self,
-        ) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError> {
+        ) -> futures_util::stream::BoxStream<
+            '_,
+            Result<Result<Release, ReleaseScanFailure>, ScanReleasesError>,
+        > {
             let mut results = self.0.iter().cloned().map(Ok).collect::<Vec<_>>();
 
             results.push(Err(ReleaseScanFailure::InvalidId {
@@ -136,17 +153,49 @@ mod tests {
                 source: "invalid-release".parse::<ReleaseId>().unwrap_err(),
             }));
 
-            Ok(results)
+            let tail = futures_util::stream::once(async move {
+                if let Some(gate) = &self.1 {
+                    gate.notify_one();
+                    std::future::pending::<()>().await;
+                }
+                None
+            })
+            .filter_map(|item| async move { item });
+            futures_util::stream::iter(results.into_iter().map(Ok))
+                .chain(tail)
+                .boxed()
         }
     }
 
     #[tokio::test]
-    async fn execute_preserves_the_cause_of_scan_failures() {
-        let error = BuildMetadataIndexUseCase::new(Arc::new(UnavailableStorage))
+    async fn execute_publishes_releases_before_the_scan_finishes() {
+        let release = sample_release(&sample_metadata());
+        let index = Arc::new(InMemoryMetadataIndex::new());
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let scan = BuildMetadataIndexUseCase::new(
+            Arc::new(FixtureStorage(vec![release.clone()], Some(gate.clone()))),
+            index.clone(),
+        );
+        let worker = tokio::spawn(async move { scan.execute().await });
+        tokio::time::timeout(std::time::Duration::from_secs(5), gate.notified())
+            .await
+            .unwrap();
+        assert!(!worker.is_finished());
+        assert_eq!(
+            index.get_release(release.id()).await.unwrap().id(),
+            release.id()
+        );
+        worker.abort();
+        assert!(worker.await.unwrap_err().is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn execute_propagates_fatal_scan_failures() {
+        let index = Arc::new(InMemoryMetadataIndex::new());
+        let error = BuildMetadataIndexUseCase::new(Arc::new(UnavailableStorage), index)
             .execute()
             .await
             .unwrap_err();
-
         assert!(
             successors(Some(&error as &dyn error::Error), |cause| cause.source()).any(|cause| {
                 cause
@@ -157,32 +206,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_keeps_valid_releases_when_individual_candidates_fail() {
-        let release = sample_release(&sample_metadata());
-
-        let accepted =
-            BuildMetadataIndexUseCase::new(Arc::new(FixtureStorage(vec![release.clone()])))
-                .execute()
-                .await
-                .unwrap();
-
-        assert_eq!(accepted.len(), 1);
-        assert_eq!(accepted[0].id(), release.id());
-    }
-
-    #[tokio::test]
-    async fn execute_propagates_collection_conflicts() {
-        let release = sample_release(&sample_metadata());
-        assert!(matches!(
-            BuildMetadataIndexUseCase::new(Arc::new(FixtureStorage(vec![
-                release.clone(),
-                release
-            ])))
-            .execute()
-            .await,
-            Err(BuildMetadataIndexError::InconsistentReleases(
-                ReleasesValidationError::DuplicateRelease { .. }
-            ))
-        ));
+    async fn execute_rejects_conflicts_and_continues_to_later_releases() {
+        let first = sample_release(&sample_metadata());
+        let mut raw = sample_metadata();
+        *raw.release_title_mut() = "Later release".into();
+        let later = sample_release_with_audio_id(
+            &raw,
+            "229fc612-8a56-45d0-bf61-55b36ff3dcba".parse().unwrap(),
+        );
+        let index = Arc::new(InMemoryMetadataIndex::new());
+        BuildMetadataIndexUseCase::new(
+            Arc::new(FixtureStorage(
+                vec![first.clone(), first.clone(), later.clone()],
+                None,
+            )),
+            index.clone(),
+        )
+        .execute()
+        .await
+        .unwrap();
+        assert_eq!(
+            index.list_releases(100, None).await.unwrap().items().len(),
+            2
+        );
+        assert_eq!(
+            index.get_release(first.id()).await.unwrap().id(),
+            first.id()
+        );
+        assert_eq!(
+            index.get_release(later.id()).await.unwrap().id(),
+            later.id()
+        );
     }
 }

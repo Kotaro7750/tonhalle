@@ -334,9 +334,12 @@ mod tests {
             Ok(())
         }
 
-        async fn scan_releases(
+        fn scan_releases(
             &self,
-        ) -> Result<Vec<Result<Release, ReleaseScanFailure>>, ScanReleasesError> {
+        ) -> futures_util::stream::BoxStream<
+            '_,
+            Result<Result<Release, ReleaseScanFailure>, ScanReleasesError>,
+        > {
             panic!("import must not scan storage")
         }
     }
