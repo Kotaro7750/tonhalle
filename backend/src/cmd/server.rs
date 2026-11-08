@@ -91,7 +91,10 @@ async fn serve_with_scan(
     scan: BuildMetadataIndexUseCase,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> Result<(), IoError> {
-    let mut worker = tokio::spawn(async move { scan.execute().await });
+    let mut worker = tokio::spawn(async move {
+        tracing::info!("Music storage scan started");
+        scan.execute().await
+    });
     let abort = worker.abort_handle();
     let server = axum::serve(
         listener,

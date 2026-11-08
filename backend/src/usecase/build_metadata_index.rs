@@ -42,8 +42,11 @@ impl BuildMetadataIndexUseCase {
                     continue;
                 }
             };
+            tracing::info!(release_id = %release.id(),title = %release.title(), "Indexing release");
             match self.index.add_release(release).await {
-                Ok(()) => {}
+                Ok(()) => {
+                    tracing::info!("Index release accepted");
+                }
                 Err(
                     error @ (AddReleaseError::DuplicateRelease { .. }
                     | AddReleaseError::SharedTrack { .. }
