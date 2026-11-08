@@ -1,5 +1,10 @@
 //! Creates valid domain values and tagged audio bytes for tests.
 
+use std::{
+    fs::File,
+    io::{Cursor, Seek, SeekFrom, Write},
+};
+
 use crate::domain::{
     id::ReleaseId,
     import::{ImportAudio, ImportValidationError, ImportedReleaseValidator},
@@ -29,14 +34,16 @@ pub(crate) fn validate_import_release(
 ) -> Result<ReleaseMetadata, ImportValidationError> {
     let mut builder = ImportedReleaseValidator::default();
     for bytes in sources {
-        builder.push(bytes)?;
+        builder.push(Cursor::new(bytes))?;
     }
     builder.finish()
 }
 
 /// Creates staging audio through the release validator.
 pub(crate) fn sample_import_audio(bytes: Vec<u8>) -> ImportAudio {
-    ImportedReleaseValidator::default().push(bytes).unwrap()
+    ImportedReleaseValidator::default()
+        .push(Cursor::new(bytes))
+        .unwrap()
 }
 
 /// Creates valid storage information without parsing audio.
@@ -177,4 +184,23 @@ pub(crate) fn sample_audio_with_mbids(
     bytes[4..8].copy_from_slice(&riff_len.to_le_bytes());
 
     bytes
+}
+
+/// Writes a sparse WAV with tags after a large audio payload without allocating that payload.
+pub(crate) fn write_sparse_audio(file: &mut File, raw: &RawMetadata, payload_length: u32) {
+    let mut header = sample_audio(raw);
+    let data = header
+        .windows(4)
+        .position(|chunk| chunk == b"data")
+        .unwrap();
+    let original = u32::from_le_bytes(header[data + 4..data + 8].try_into().unwrap());
+    let tail = header[data + 8 + original as usize..].to_vec();
+    let tail_offset = data as u64 + 8 + u64::from(payload_length);
+    let length = tail_offset + tail.len() as u64;
+    header[4..8].copy_from_slice(&((length - 8) as u32).to_le_bytes());
+    header[data + 4..data + 8].copy_from_slice(&payload_length.to_le_bytes());
+    file.write_all(&header[..data + 8]).unwrap();
+    file.seek(SeekFrom::Start(tail_offset)).unwrap();
+    file.write_all(&tail).unwrap();
+    file.rewind().unwrap();
 }

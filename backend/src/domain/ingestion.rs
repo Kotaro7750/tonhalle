@@ -1,6 +1,7 @@
 //! Composes audio extraction and validated entity construction for storage adapters.
 
 use metadata::ExtractMetadataError;
+use std::io::{Read, Seek};
 use url::Url;
 
 use crate::domain::{
@@ -38,13 +39,13 @@ pub(crate) enum IngestTrackError {
 
 /// Extracts audio metadata and validates its entities against the parent release identity.
 pub(crate) fn ingest_track(
-    bytes: &[u8],
+    reader: impl Read + Seek,
     audio_file_id: AudioFileId,
     object_key: String,
     playback_url: Url,
     release_id: &ReleaseId,
 ) -> Result<(Track, ReleaseMetadata), IngestTrackError> {
-    let parsed = parse_audio(bytes)?;
+    let parsed = parse_audio(reader)?;
     if parsed.release_metadata.id() != release_id {
         return Err(IngestTrackError::ReleaseIdMismatch {
             actual: parsed.release_metadata.id().clone(),
@@ -76,8 +77,8 @@ impl ParsedAudio {
 }
 
 /// Extracts and validates audio without requiring stored identity or playback links.
-pub(crate) fn parse_audio(bytes: &[u8]) -> Result<ParsedAudio, IngestTrackError> {
-    let raw = metadata::extract_metadata(bytes)?;
+pub(crate) fn parse_audio(reader: impl Read + Seek) -> Result<ParsedAudio, IngestTrackError> {
+    let raw = metadata::extract_metadata(reader)?;
     let release_metadata = ReleaseMetadata::new(
         raw.release_title(),
         raw.release_date().as_deref(),
@@ -118,6 +119,8 @@ pub(crate) fn build_release(
 /// Verifies metadata constraints and entity identity rules.
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
     use crate::domain::ingestion::metadata::{RawMetadata, sample_metadata};
     use crate::test_support::{release_metadata, sample_audio, sample_audio_file};
@@ -129,7 +132,7 @@ mod tests {
     ) -> Result<(Track, ReleaseMetadata), IngestTrackError> {
         let audio = sample_audio_file();
         ingest_track(
-            &sample_audio(raw),
+            Cursor::new(sample_audio(raw)),
             audio.id(),
             audio.object_key().into(),
             audio.playback_url().clone(),
@@ -208,7 +211,7 @@ mod tests {
         let storage = sample_audio_file();
         let parse = |bytes: &[u8]| {
             ingest_track(
-                bytes,
+                Cursor::new(bytes),
                 storage.id(),
                 storage.object_key().into(),
                 storage.playback_url().clone(),

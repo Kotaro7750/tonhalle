@@ -10,8 +10,8 @@ use std::sync::{
 };
 use std::{
     collections::BTreeMap,
-    fs::{File, OpenOptions, create_dir_all, read, rename, symlink_metadata},
-    io::{Error as IoError, ErrorKind, Write},
+    fs::{File, OpenOptions, create_dir_all, rename, symlink_metadata},
+    io::{self, BufReader, Error as IoError, ErrorKind},
     path::{Path, PathBuf, StripPrefixError},
 };
 use tokio::task::spawn_blocking;
@@ -137,11 +137,11 @@ impl FileSystemMusicStorage {
         })
     }
 
-    /// Reads original bytes with their existing UUID and escaped playback URL.
+    /// Opens an audio source with its existing UUID and escaped playback URL.
     fn read_audio(
         &self,
         path: &Path,
-    ) -> Result<(AudioFileId, String, Url, Vec<u8>), ReadAudioFileError> {
+    ) -> Result<(AudioFileId, String, Url, BufReader<File>), ReadAudioFileError> {
         if !symlink_metadata(path)
             .map_err(ReadAudioFileError::Read)?
             .is_file()
@@ -174,9 +174,9 @@ impl FileSystemMusicStorage {
             .pop_if_empty()
             .extend(segments);
 
-        let bytes = read(path).map_err(ReadAudioFileError::Read)?;
+        let reader = BufReader::new(File::open(path).map_err(ReadAudioFileError::Read)?);
 
-        Ok((audio_id, object_key, playback_url, bytes))
+        Ok((audio_id, object_key, playback_url, reader))
     }
 
     /// Obtains the release identity from its directory without reading any audio bytes.
@@ -220,8 +220,8 @@ impl FileSystemMusicStorage {
                     object_key: object_key.clone(),
                     source: Box::new(source),
                 })
-                .and_then(|(audio_id, key, playback_url, bytes)| {
-                    ingest_track(&bytes, audio_id, key, playback_url, &id)
+                .and_then(|(audio_id, key, playback_url, reader)| {
+                    ingest_track(reader, audio_id, key, playback_url, &id)
                         .map_err(|source| AudioScanFailure::Parse { object_key, source })
                 });
 
@@ -276,7 +276,7 @@ impl FileSystemMusicStorage {
             .write(true)
             .create_new(true)
             .open(directory.join(format!("{}.{}", uuid::Uuid::new_v4(), extension)))?;
-        file.write_all(audio.bytes())?;
+        io::copy(&mut audio.into_reader()?, &mut file)?;
         file.sync_all()?;
         Ok(())
     }

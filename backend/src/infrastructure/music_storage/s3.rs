@@ -1,19 +1,18 @@
 //! Saves and scans audio objects directly using a release-based S3 key layout.
 
-use aws_sdk_s3::{
-    Client,
-    error::SdkError,
-    operation::{
-        get_object::GetObjectError, list_objects_v2::ListObjectsV2Error, put_object::PutObjectError,
-    },
-    primitives::{ByteStream, ByteStreamError},
-};
 use futures_util::{
-    StreamExt,
+    StreamExt, TryStreamExt,
     stream::{self, BoxStream},
 };
-use std::collections::BTreeMap;
+use object_store::{
+    Attribute, Attributes, ObjectStore, ObjectStoreExt,
+    buffered::{BufReader, BufWriter},
+    path::Path,
+};
+use std::{collections::BTreeMap, io, sync::Arc};
+use tokio::io::AsyncWriteExt;
 use tokio::task::spawn_blocking;
+use tokio_util::io::SyncIoBridge;
 use url::Url;
 use uuid::Uuid;
 
@@ -30,27 +29,11 @@ use crate::{
     },
 };
 
-/// Stores and scans release audio through the asynchronous S3 SDK.
+/// Stores and scans release audio through the object-store API.
 pub(crate) struct S3MusicStorage {
-    client: Client,
-    bucket: String,
+    store: Arc<dyn ObjectStore>,
     prefix: String,
     playback_url_base: Option<Url>,
-}
-
-/// A failure to check or save a release in S3.
-#[derive(Debug, thiserror::Error)]
-enum S3SaveReleaseError {
-    /// Existing release objects could not be enumerated.
-    #[error("checking existing release objects: {0}")]
-    List(#[source] Box<SdkError<ListObjectsV2Error>>),
-    /// An audio object could not be uploaded.
-    #[error("uploading {object_key}: {source}")]
-    Put {
-        object_key: String,
-        #[source]
-        source: Box<SdkError<PutObjectError>>,
-    },
 }
 
 /// A failure to obtain source audio bytes and their stored identity.
@@ -68,25 +51,20 @@ enum S3ReadAudioError {
     /// Playback links cannot be built from the delivery endpoint.
     #[error("invalid playback URL base")]
     InvalidPlaybackUrlBase,
-    /// S3 could not return the requested object.
-    #[error("getting audio object: {0}")]
-    Get(#[source] Box<SdkError<GetObjectError>>),
     /// The response body could not be read completely.
     #[error("reading audio body: {0}")]
-    Body(#[from] ByteStreamError),
+    Body(#[from] object_store::Error),
 }
 
 impl S3MusicStorage {
     /// Connects storage to its bucket namespace and optional delivery endpoint.
     pub(crate) fn new(
-        client: Client,
-        bucket: String,
+        store: Arc<dyn ObjectStore>,
         prefix: String,
         playback_url_base: Option<Url>,
     ) -> Self {
         Self {
-            client,
-            bucket,
+            store,
             prefix,
             playback_url_base,
         }
@@ -102,57 +80,27 @@ impl S3MusicStorage {
     }
 
     /// Checks for any existing release objects without uploading content.
-    async fn check_destination(&self, id: &ReleaseId) -> Result<bool, S3SaveReleaseError> {
-        let prefix = self.key(&format!("{}/", id));
-        let existing = self
-            .client
-            .list_objects_v2()
-            .bucket(&self.bucket)
-            .prefix(&prefix)
-            .max_keys(1)
-            .send()
+    async fn check_destination(&self, id: &ReleaseId) -> object_store::Result<bool> {
+        let prefix = Path::parse(self.key(id.as_ref()))?;
+        self.store
+            .list(Some(&prefix))
+            .try_next()
             .await
-            .map_err(|source| S3SaveReleaseError::List(Box::new(source)))?;
-        Ok(!existing.contents().is_empty())
+            .map(|object| object.is_some())
     }
 
-    /// Enumerates temporary objects completely before copying or deleting them.
-    async fn staging_keys(
-        &self,
-        id: Option<&ReleaseId>,
-    ) -> Result<Vec<String>, S3SaveReleaseError> {
+    /// Enumerates staging completely before copying or deleting any objects.
+    async fn staging_keys(&self, id: Option<&ReleaseId>) -> object_store::Result<Vec<Path>> {
         let relative = id.map_or_else(
-            || ".tonhalle-import/".to_owned(),
-            |id| format!(".tonhalle-import/{id}/"),
+            || ".tonhalle-import".to_owned(),
+            |id| format!(".tonhalle-import/{id}"),
         );
-        let mut pages = self
-            .client
-            .list_objects_v2()
-            .bucket(&self.bucket)
-            .prefix(self.key(&relative))
-            .into_paginator()
-            .send();
-        let mut keys = Vec::new();
-        while let Some(page) = pages.next().await {
-            let page = page.map_err(|source| S3SaveReleaseError::List(Box::new(source)))?;
-            keys.extend(
-                page.contents()
-                    .iter()
-                    .filter_map(|object| object.key().map(str::to_owned)),
-            );
-        }
-        Ok(keys)
-    }
-
-    /// Encodes a copy source as a bucket and key path, including reserved key characters.
-    fn copy_source(&self, key: &str) -> String {
-        let mut url = Url::parse("https://s3.invalid/").unwrap();
-        url.path_segments_mut()
-            .unwrap()
-            .clear()
-            .push(&self.bucket)
-            .extend(key.split('/'));
-        url.path().trim_start_matches('/').to_owned()
+        let prefix = Path::parse(self.key(&relative))?;
+        self.store
+            .list(Some(&prefix))
+            .map_ok(|object| object.location)
+            .try_collect()
+            .await
     }
 
     /// Preserves the release identity and the underlying SDK failure.
@@ -166,33 +114,15 @@ impl S3MusicStorage {
         }
     }
 
-    async fn read(&self, key: &str) -> Result<Vec<u8>, S3ReadAudioError> {
-        Ok(self
-            .client
-            .get_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .send()
-            .await
-            .map_err(|source| S3ReadAudioError::Get(Box::new(source)))?
-            .body
-            .collect()
-            .await?
-            .into_bytes()
-            .to_vec())
-    }
-
-    /// Reads all enumerated audio sources before constructing a release.
+    /// Attempts every audio source before constructing a validated release.
     async fn scan_release(
         &self,
         id: ReleaseId,
         keys: Vec<String>,
     ) -> Result<Release, ReleaseScanFailure> {
-        // Attempt every audio object so one failure does not hide other failures in the release.
         let mut tracks = Vec::new();
         let mut failures = Vec::new();
         for key in keys {
-            // Recover the stored identity and escaped playback URL before downloading the source bytes.
             let source = async {
                 let filename = key.rsplit('/').next().unwrap_or_default();
                 let (stem, _) = filename
@@ -207,21 +137,22 @@ impl S3MusicStorage {
                     .map_err(|_| S3ReadAudioError::InvalidPlaybackUrlBase)?
                     .pop_if_empty()
                     .extend(key.split('/'));
-                Ok::<_, S3ReadAudioError>((audio_id, url, self.read(&key).await?))
+                let path = Path::parse(&key).map_err(object_store::Error::from)?;
+                let meta = self.store.head(&path).await?;
+                let reader = BufReader::with_capacity(self.store.clone(), &meta, 8192);
+                Ok::<_, S3ReadAudioError>((audio_id, url, SyncIoBridge::new(reader)))
             }
             .await;
-
-            // Parse downloaded audio on a blocking worker while keeping read and parse failures distinct.
             let result = match source {
                 Err(source) => Err(AudioScanFailure::Read {
                     object_key: key.clone(),
-                    source: source.into(),
+                    source: Box::new(source),
                 }),
-                Ok((audio_id, url, bytes)) => {
+                Ok((audio_id, url, reader)) => {
                     let id = id.clone();
                     let object_key = key.clone();
                     spawn_blocking(move || {
-                        ingest_track(&bytes, audio_id, object_key.clone(), url, &id)
+                        ingest_track(reader, audio_id, object_key.clone(), url, &id)
                             .map_err(|source| AudioScanFailure::Parse { object_key, source })
                     })
                     .await
@@ -237,20 +168,16 @@ impl S3MusicStorage {
                 Err(error) => failures.push(error),
             }
         }
-
-        // Reject the release after all sources have been attempted if any audio failed.
         if !failures.is_empty() {
             return Err(ReleaseScanFailure::Audio { id, failures });
         }
-
-        // Validate consistency across the accepted tracks before returning the domain release.
         let release_id = id.clone();
         spawn_blocking(move || build_release(release_id, tracks))
             .await
             .map_err(|source| ReleaseScanFailure::Audio {
                 id: id.clone(),
                 failures: vec![AudioScanFailure::Read {
-                    object_key: self.key(&format!("{id}/")),
+                    object_key: self.key(id.as_ref()),
                     source: Box::new(source),
                 }],
             })?
@@ -268,23 +195,31 @@ impl MusicStorage for S3MusicStorage {
             Uuid::new_v4(),
             media.extension()
         ));
-        self.client
-            .put_object()
-            .bucket(&self.bucket)
-            .key(&key)
-            .content_type(media.as_str())
-            .body(ByteStream::from(audio.into_bytes()))
-            .send()
+        let path = Path::parse(&key).map_err(|source| Self::save_error(&id, source))?;
+        let mut attributes = Attributes::new();
+        attributes.insert(Attribute::ContentType, media.as_str().to_owned().into());
+        let writer = BufWriter::with_capacity(self.store.clone(), path, 5 * 1024 * 1024)
+            .with_max_concurrency(1)
+            .with_attributes(attributes);
+        let mut writer = SyncIoBridge::new(writer);
+        let (copied, mut writer) = spawn_blocking(move || {
+            let copied = audio
+                .into_reader()
+                .and_then(|mut reader| io::copy(&mut reader, &mut writer));
+            (copied, writer.into_inner())
+        })
+        .await
+        .map_err(|source| Self::save_error(&id, source))?;
+        if let Err(source) = copied {
+            if let Err(error) = writer.abort().await {
+                tracing::warn!(release_id = %id, ?error, "Aborting staging upload failed");
+            }
+            return Err(Self::save_error(&id, source));
+        }
+        writer
+            .shutdown()
             .await
-            .map_err(|source| {
-                Self::save_error(
-                    &id,
-                    S3SaveReleaseError::Put {
-                        object_key: key,
-                        source: Box::new(source),
-                    },
-                )
-            })?;
+            .map_err(|source| Self::save_error(&id, source))?;
         Ok(())
     }
 
@@ -314,13 +249,11 @@ impl MusicStorage for S3MusicStorage {
             ));
         }
         for key in keys {
-            let filename = key.rsplit('/').next().unwrap();
-            self.client
-                .copy_object()
-                .bucket(&self.bucket)
-                .key(self.key(&format!("{id}/{filename}")))
-                .copy_source(self.copy_source(&key))
-                .send()
+            let filename = key.filename().unwrap();
+            let destination = Path::parse(self.key(&format!("{id}/{filename}")))
+                .map_err(|source| Self::save_error(id, source))?;
+            self.store
+                .copy(&key, &destination)
                 .await
                 .map_err(|source| Self::save_error(id, source))?;
         }
@@ -332,35 +265,11 @@ impl MusicStorage for S3MusicStorage {
             .staging_keys(id)
             .await
             .map_err(DeleteStagingError::new)?;
-        for chunk in keys.chunks(1000) {
-            let objects = chunk
-                .iter()
-                .map(|key| {
-                    aws_sdk_s3::types::ObjectIdentifier::builder()
-                        .key(key)
-                        .build()
-                })
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(DeleteStagingError::new)?;
-            let delete = aws_sdk_s3::types::Delete::builder()
-                .set_objects(Some(objects))
-                .build()
-                .map_err(DeleteStagingError::new)?;
-            let result = self
-                .client
-                .delete_objects()
-                .bucket(&self.bucket)
-                .delete(delete)
-                .send()
-                .await
-                .map_err(DeleteStagingError::new)?;
-            if !result.errors().is_empty() {
-                return Err(DeleteStagingError::new(std::io::Error::other(format!(
-                    "S3 staging deletion failed: {:?}",
-                    result.errors()
-                ))));
-            }
-        }
+        self.store
+            .delete_stream(stream::iter(keys.into_iter().map(Ok)).boxed())
+            .try_collect::<Vec<_>>()
+            .await
+            .map_err(DeleteStagingError::new)?;
         Ok(())
     }
 
@@ -373,35 +282,29 @@ impl MusicStorage for S3MusicStorage {
                 None => {
                     // Enumerate every page before scanning releases, since one release may span multiple pages.
                     let prefix = self.key("");
-                    let mut pages = self
-                        .client
-                        .list_objects_v2()
-                        .bucket(&self.bucket)
-                        .prefix(&prefix)
-                        .into_paginator()
-                        .send();
+                    let path = Path::parse(prefix.trim_end_matches('/'))
+                        .map_err(ScanReleasesError::new)?;
+                    let mut objects = self.store.list(Some(&path));
                     let mut groups = BTreeMap::<String, Vec<String>>::new();
-                    while let Some(page) = pages.next().await {
-                        let page = page.map_err(ScanReleasesError::new)?;
-                        // Group only supported audio at the expected release/filename depth within the configured prefix.
-                        for object in page.contents() {
-                            let Some(key) = object.key() else { continue };
-                            let Some((release, filename)) = key
-                                .strip_prefix(&prefix)
-                                .and_then(|key| key.split_once('/'))
-                            else {
-                                continue;
-                            };
-                            if filename.contains('/')
-                                || filename
-                                    .rsplit_once('.')
-                                    .and_then(|(_, extension)| MediaType::from_extension(extension))
-                                    .is_none()
-                            {
-                                continue;
-                            }
-                            groups.entry(release.into()).or_default().push(key.into());
+                    while let Some(object) =
+                        objects.try_next().await.map_err(ScanReleasesError::new)?
+                    {
+                        let key = object.location.as_ref();
+                        let Some((release, filename)) = key
+                            .strip_prefix(&prefix)
+                            .and_then(|key| key.split_once('/'))
+                        else {
+                            continue;
+                        };
+                        if filename.contains('/')
+                            || filename
+                                .rsplit_once('.')
+                                .and_then(|(_, extension)| MediaType::from_extension(extension))
+                                .is_none()
+                        {
+                            continue;
                         }
+                        groups.entry(release.into()).or_default().push(key.into());
                     }
 
                     groups.into_iter()
@@ -423,130 +326,261 @@ impl MusicStorage for S3MusicStorage {
     }
 }
 
-/// Verifies direct audio persistence and scanning without live AWS services.
+/// Verifies storage behavior through the object-store contract without live S3 writes.
 #[cfg(test)]
 mod tests {
-    use aws_sdk_s3::{
-        operation::{
-            copy_object::{CopyObjectError, CopyObjectOutput},
-            delete_objects::DeleteObjectsOutput,
-            get_object::GetObjectOutput,
-            list_objects_v2::{ListObjectsV2Error, ListObjectsV2Output},
-            put_object::PutObjectOutput,
-        },
-        types::Object,
+    use futures_util::{
+        StreamExt, TryStreamExt,
+        stream::{self, BoxStream},
     };
-    use aws_smithy_mocks::{MockResponse, RuleMode, mock, mock_client};
-    use futures_util::TryStreamExt;
+    use object_store::{
+        CopyOptions, GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore,
+        ObjectStoreExt, PutMultipartOptions, PutOptions, PutPayload, PutResult, UploadPart,
+        local::LocalFileSystem, memory::InMemory, path::Path,
+    };
     use std::{
-        collections::BTreeMap,
-        sync::{Arc, Mutex},
+        fmt,
+        fs::File,
+        io::{Read, Seek, SeekFrom, Write},
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
     };
 
     use super::*;
-    use crate::test_support::{sample_import_audio, validate_import_release};
-    use crate::{domain::ingestion::metadata::sample_metadata, test_support::sample_audio};
+    use crate::{
+        domain::{import::ImportedReleaseValidator, ingestion::metadata::sample_metadata},
+        test_support::{
+            sample_audio, sample_import_audio, validate_import_release, write_sparse_audio,
+        },
+    };
 
-    /// Constructs an adapter whose delivery endpoint maps the bucket root.
-    fn storage(client: Client) -> S3MusicStorage {
+    /// Adds observable reads and deterministic infrastructure failures to a real object-store implementation.
+    #[derive(Debug)]
+    struct TestStore {
+        inner: Arc<dyn ObjectStore>,
+        ranges: Mutex<Vec<std::ops::Range<u64>>>,
+        copies: AtomicUsize,
+        aborted_uploads: Arc<AtomicUsize>,
+        fail_copy: bool,
+        fail_list: bool,
+    }
+
+    impl TestStore {
+        /// Wraps storage with fault injection disabled.
+        fn new(inner: Arc<dyn ObjectStore>) -> Self {
+            Self {
+                inner,
+                ranges: Mutex::new(Vec::new()),
+                copies: AtomicUsize::new(0),
+                aborted_uploads: Arc::new(AtomicUsize::new(0)),
+                fail_copy: false,
+                fail_list: false,
+            }
+        }
+    }
+
+    impl fmt::Display for TestStore {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "TestStore")
+        }
+    }
+
+    /// Supplies an identifiable infrastructure failure.
+    fn failure() -> object_store::Error {
+        object_store::Error::Generic {
+            store: "test",
+            source: "injected failure".into(),
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ObjectStore for TestStore {
+        async fn get_opts(
+            &self,
+            path: &Path,
+            options: GetOptions,
+        ) -> object_store::Result<GetResult> {
+            let is_range = options.range.is_some();
+            let result = self.inner.get_opts(path, options).await?;
+            if is_range {
+                self.ranges.lock().unwrap().push(result.range.clone());
+            }
+            Ok(result)
+        }
+        async fn put_opts(
+            &self,
+            path: &Path,
+            payload: PutPayload,
+            options: PutOptions,
+        ) -> object_store::Result<PutResult> {
+            self.inner.put_opts(path, payload, options).await
+        }
+        async fn put_multipart_opts(
+            &self,
+            path: &Path,
+            options: PutMultipartOptions,
+        ) -> object_store::Result<Box<dyn MultipartUpload>> {
+            let upload = self.inner.put_multipart_opts(path, options).await?;
+            Ok(Box::new(TrackedUpload {
+                upload,
+                aborted: self.aborted_uploads.clone(),
+            }))
+        }
+        fn delete_stream(
+            &self,
+            paths: BoxStream<'static, object_store::Result<Path>>,
+        ) -> BoxStream<'static, object_store::Result<Path>> {
+            self.inner.delete_stream(paths)
+        }
+        fn list(
+            &self,
+            prefix: Option<&Path>,
+        ) -> BoxStream<'static, object_store::Result<ObjectMeta>> {
+            if self.fail_list {
+                self.inner
+                    .list(prefix)
+                    .chain(stream::once(async { Err(failure()) }))
+                    .boxed()
+            } else {
+                self.inner.list(prefix)
+            }
+        }
+        async fn list_with_delimiter(
+            &self,
+            prefix: Option<&Path>,
+        ) -> object_store::Result<ListResult> {
+            self.inner.list_with_delimiter(prefix).await
+        }
+        async fn copy_opts(
+            &self,
+            from: &Path,
+            to: &Path,
+            options: CopyOptions,
+        ) -> object_store::Result<()> {
+            if self.fail_copy && self.copies.fetch_add(1, Ordering::Relaxed) > 0 {
+                return Err(failure());
+            }
+            self.inner.copy_opts(from, to, options).await
+        }
+    }
+
+    /// Records whether a failed source transfer aborts its multipart upload.
+    #[derive(Debug)]
+    struct TrackedUpload {
+        upload: Box<dyn MultipartUpload>,
+        aborted: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl MultipartUpload for TrackedUpload {
+        fn put_part(&mut self, data: PutPayload) -> UploadPart {
+            self.upload.put_part(data)
+        }
+        async fn complete(&mut self) -> object_store::Result<PutResult> {
+            self.upload.complete().await
+        }
+        async fn abort(&mut self) -> object_store::Result<()> {
+            self.aborted.fetch_add(1, Ordering::Relaxed);
+            self.upload.abort().await
+        }
+    }
+
+    /// Fails only within the audio payload, leaving metadata reads and seeks intact.
+    struct PayloadFailure(File);
+
+    impl Read for PayloadFailure {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if (6 * 1024 * 1024..7 * 1024 * 1024).contains(&self.0.stream_position()?) {
+                return Err(io::Error::other("injected source read failure"));
+            }
+            self.0.read(buffer)
+        }
+    }
+    impl Seek for PayloadFailure {
+        fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+            self.0.seek(position)
+        }
+    }
+
+    #[tokio::test]
+    async fn stage_audio_streams_multipart_and_aborts_when_source_reads_fail() {
+        for fail_read in [false, true] {
+            let memory = Arc::new(InMemory::new());
+            let observed = Arc::new(TestStore::new(memory.clone()));
+            let storage = storage(observed.clone(), "content");
+            let mut file = tempfile::tempfile().unwrap();
+            write_sparse_audio(&mut file, &sample_metadata(), 12 * 1024 * 1024);
+            let length = file.metadata().unwrap().len();
+            let audio = if fail_read {
+                ImportedReleaseValidator::default()
+                    .push(PayloadFailure(file))
+                    .unwrap()
+            } else {
+                ImportedReleaseValidator::default().push(file).unwrap()
+            };
+            let result = storage.stage_audio(audio).await;
+            let objects = memory.list(None).try_collect::<Vec<_>>().await.unwrap();
+            if fail_read {
+                assert!(result.is_err());
+                assert!(objects.is_empty());
+                assert_eq!(observed.aborted_uploads.load(Ordering::Relaxed), 1);
+            } else {
+                result.unwrap();
+                assert_eq!(objects.len(), 1);
+                assert_eq!(objects[0].size, length);
+                assert_eq!(observed.aborted_uploads.load(Ordering::Relaxed), 0);
+                let result = memory.get(&objects[0].location).await.unwrap();
+                assert_eq!(
+                    result
+                        .attributes
+                        .get(&Attribute::ContentType)
+                        .unwrap()
+                        .as_ref(),
+                    "audio/wav"
+                );
+            }
+        }
+    }
+
+    /// Connects a test store to the same playback namespace as production.
+    fn storage(store: Arc<dyn ObjectStore>, prefix: &str) -> S3MusicStorage {
         S3MusicStorage::new(
-            client,
-            "music".into(),
-            "space #".into(),
+            store,
+            prefix.into(),
             Some("https://example.com/music/".parse().unwrap()),
         )
     }
 
-    /// Lists only objects within the requested namespace, as S3 does.
-    fn listing(objects: &BTreeMap<String, Vec<u8>>, prefix: &str) -> ListObjectsV2Output {
-        let mut output = ListObjectsV2Output::builder().is_truncated(false);
-        for key in objects.keys().filter(|key| key.starts_with(prefix)) {
-            output = output.contents(Object::builder().key(key).build());
-        }
-        output.build()
-    }
-
-    /// Simulates stored objects while allowing a publication failure after one copy.
-    fn object_client(objects: Arc<Mutex<BTreeMap<String, Vec<u8>>>>, fail_copy: bool) -> Client {
-        let state = objects.clone();
-        let list = mock!(Client::list_objects_v2).then_compute_output(move |request| {
-            listing(&state.lock().unwrap(), request.prefix().unwrap())
-        });
-        let state = objects.clone();
-        let put = mock!(Client::put_object)
-            .match_requests(|request| request.content_type() == Some("audio/wav"))
-            .then_compute_output(move |request| {
-                state.lock().unwrap().insert(
-                    request.key().unwrap().into(),
-                    request.body().bytes().unwrap().to_vec(),
-                );
-                PutObjectOutput::builder().build()
-            });
-        let state = objects.clone();
-        let copy = mock!(Client::copy_object).then_compute_response(move |request| {
-            let mut objects = state.lock().unwrap();
-            if fail_copy && objects.keys().any(|key| !key.contains(".tonhalle-import/")) {
-                return MockResponse::Error(CopyObjectError::ObjectNotInActiveTierError(
-                    aws_sdk_s3::types::error::ObjectNotInActiveTierError::builder().build(),
-                ));
-            }
-            let source = objects
-                .keys()
-                .find(|key| {
-                    let mut url = Url::parse("https://s3.invalid/").unwrap();
-                    url.path_segments_mut()
-                        .unwrap()
-                        .clear()
-                        .push("music")
-                        .extend(key.split('/'));
-                    Some(url.path().trim_start_matches('/')) == request.copy_source()
-                })
-                .unwrap()
-                .clone();
-            let bytes = objects[&source].clone();
-            objects.insert(request.key().unwrap().into(), bytes);
-            MockResponse::Output(CopyObjectOutput::builder().build())
-        });
-        let state = objects.clone();
-        let delete = mock!(Client::delete_objects).then_compute_output(move |request| {
-            let mut objects = state.lock().unwrap();
-            for object in request.delete().unwrap().objects() {
-                objects.remove(object.key());
-            }
-            DeleteObjectsOutput::builder().build()
-        });
-        let get = mock!(Client::get_object).then_compute_output(move |request| {
-            GetObjectOutput::builder()
-                .body(ByteStream::from(
-                    objects.lock().unwrap()[request.key().unwrap()].clone(),
-                ))
-                .build()
-        });
-        mock_client!(
-            aws_sdk_s3,
-            RuleMode::MatchAny,
-            [&list, &put, &copy, &delete, &get]
-        )
-    }
-
     #[tokio::test]
-    async fn commit_release_preserves_audio_and_skips_existing_release_while_cleanup_removes_only_staging()
-     {
-        for configured_prefix in ["", "space #%/音"] {
-            let objects = Arc::new(Mutex::new(BTreeMap::new()));
-            let mut storage = storage(object_client(objects.clone(), false));
-            storage.prefix = configured_prefix.into();
-            let mut second = sample_metadata();
+    async fn commit_release_preserves_bytes_content_type_and_existing_releases() {
+        for prefix in ["", "space #%/音"] {
+            let store = Arc::new(InMemory::new());
+            let storage = storage(store.clone(), prefix);
+            let first = sample_metadata();
+            let mut second = first.clone();
             *second.track_number_mut() = "2".into();
-            let bytes = vec![sample_audio(&sample_metadata()), sample_audio(&second)];
+            let bytes = vec![sample_audio(&first), sample_audio(&second)];
             let release = validate_import_release(bytes.clone()).unwrap();
-            for bytes in &bytes {
+            assert_eq!(
+                storage.commit_release(release.id(), true).await.unwrap(),
+                SaveReleaseOutcome::Saved
+            );
+            assert!(
+                store
+                    .list(None)
+                    .try_collect::<Vec<_>>()
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            for audio in &bytes {
                 storage
-                    .stage_audio(sample_import_audio(bytes.clone()))
+                    .stage_audio(sample_import_audio(audio.clone()))
                     .await
                     .unwrap();
             }
-            assert_eq!(objects.lock().unwrap().len(), 2);
             assert!(
                 storage
                     .scan_releases()
@@ -559,208 +593,199 @@ mod tests {
                 storage.commit_release(release.id(), false).await.unwrap(),
                 SaveReleaseOutcome::Saved
             );
-            assert_eq!(objects.lock().unwrap().len(), 4);
-            storage.delete_staging(Some(release.id())).await.unwrap();
             storage.delete_staging(None).await.unwrap();
-            let snapshot = objects.lock().unwrap().clone();
-            assert_eq!(snapshot.len(), 2);
-            let prefix = storage.key(&format!("{}/", release.id()));
-            for (key, value) in &snapshot {
-                key.strip_prefix(&prefix)
-                    .unwrap()
-                    .strip_suffix(".wav")
-                    .unwrap()
-                    .parse::<AudioFileId>()
-                    .unwrap();
-                assert!(bytes.contains(value));
+            let objects = store.list(None).try_collect::<Vec<_>>().await.unwrap();
+            assert_eq!(objects.len(), 2);
+            for object in &objects {
+                let result = store.get(&object.location).await.unwrap();
+                assert_eq!(
+                    result
+                        .attributes
+                        .get(&Attribute::ContentType)
+                        .unwrap()
+                        .as_ref(),
+                    "audio/wav"
+                );
+                assert!(bytes.contains(&result.bytes().await.unwrap().to_vec()));
             }
-            assert_eq!(
-                storage.commit_release(release.id(), false).await.unwrap(),
-                SaveReleaseOutcome::AlreadyExists
-            );
-            assert_eq!(*objects.lock().unwrap(), snapshot);
-            let scanned = storage
+            for dry_run in [true, false] {
+                assert_eq!(
+                    storage.commit_release(release.id(), dry_run).await.unwrap(),
+                    SaveReleaseOutcome::AlreadyExists
+                );
+            }
+            let mut scanned = storage
                 .scan_releases()
                 .try_collect::<Vec<_>>()
                 .await
-                .unwrap()
-                .pop()
-                .unwrap()
                 .unwrap();
+            let scanned = scanned.pop().unwrap().unwrap();
             assert_eq!(scanned.id(), release.id());
             assert_eq!(scanned.tracks().len(), 2);
-            for track in scanned.tracks() {
-                assert!(snapshot.contains_key(track.original_audio_file().object_key()));
-            }
+            assert!(scanned.tracks().iter().all(|track| {
+                track
+                    .original_audio_file()
+                    .playback_url()
+                    .as_str()
+                    .starts_with("https://example.com/music/")
+            }));
         }
     }
 
     #[tokio::test]
-    async fn commit_release_leaves_partial_audio_on_copy_failure_and_cleanup_preserves_it() {
-        let objects = Arc::new(Mutex::new(BTreeMap::new()));
-        let storage = storage(object_client(objects.clone(), true));
-        let mut second = sample_metadata();
+    async fn commit_release_preserves_partial_publication_and_cleanup_only_removes_staging() {
+        let memory = Arc::new(InMemory::new());
+        let mut fault = TestStore::new(memory.clone());
+        fault.fail_copy = true;
+        let storage = storage(Arc::new(fault), "content");
+        let first = sample_metadata();
+        let mut second = first.clone();
         *second.track_number_mut() = "2".into();
-        let bytes = vec![sample_audio(&sample_metadata()), sample_audio(&second)];
+        let bytes = vec![sample_audio(&first), sample_audio(&second)];
         let release = validate_import_release(bytes.clone()).unwrap();
-        for bytes in bytes {
+        for audio in bytes {
             storage
-                .stage_audio(sample_import_audio(bytes))
+                .stage_audio(sample_import_audio(audio))
                 .await
                 .unwrap();
         }
         assert!(storage.commit_release(release.id(), false).await.is_err());
-        assert_eq!(objects.lock().unwrap().len(), 3);
-        storage.delete_staging(None).await.unwrap();
-        assert_eq!(objects.lock().unwrap().len(), 1);
-        let scanned = storage
-            .scan_releases()
-            .try_collect::<Vec<_>>()
-            .await
-            .unwrap()
-            .pop()
-            .unwrap()
-            .unwrap();
-        assert_eq!(scanned.tracks().len(), 1);
-        assert_eq!(
-            storage.commit_release(release.id(), false).await.unwrap(),
-            SaveReleaseOutcome::AlreadyExists
-        );
+        storage.delete_staging(Some(release.id())).await.unwrap();
+        let objects = memory.list(None).try_collect::<Vec<_>>().await.unwrap();
+        assert_eq!(objects.len(), 1);
+        assert!(!objects[0].location.as_ref().contains(".tonhalle-import"));
     }
 
     #[tokio::test]
-    async fn delete_staging_paginates_and_batches_deletes_and_reports_object_errors() {
-        for fail_delete in [false, true] {
-            let list = mock!(Client::list_objects_v2).then_compute_output(|request| {
-                let mut output = ListObjectsV2Output::builder();
-                if request.continuation_token().is_none() {
-                    output = output.is_truncated(true).next_continuation_token("next");
-                    for i in 0..1000 {
-                        output = output.contents(
-                            Object::builder()
-                                .key(format!("space #/.tonhalle-import/release-a/{i}.wav"))
-                                .build(),
-                        );
-                    }
-                } else {
-                    output = output.is_truncated(false).contents(
-                        Object::builder()
-                            .key("space #/.tonhalle-import/release-b/last.wav")
-                            .build(),
-                    );
-                }
-                output.build()
-            });
-            let deleted = Arc::new(Mutex::new(Vec::new()));
-            let state = deleted.clone();
-            let delete = mock!(Client::delete_objects).then_compute_output(move |request| {
-                let objects = request.delete().unwrap().objects();
-                assert!(
-                    objects
-                        .iter()
-                        .all(|object| object.key().starts_with("space #/.tonhalle-import/"))
-                );
-                state.lock().unwrap().push(objects.len());
-                let mut output = DeleteObjectsOutput::builder();
-                if fail_delete {
-                    output = output.errors(
-                        aws_sdk_s3::types::Error::builder()
-                            .key(objects[0].key())
-                            .code("AccessDenied")
-                            .build(),
-                    );
-                }
-                output.build()
-            });
-            let client = mock_client!(aws_sdk_s3, RuleMode::MatchAny, [&list, &delete]);
-            let result = storage(client).delete_staging(None).await;
-            if fail_delete {
-                assert!(result.unwrap_err().to_string().contains("AccessDenied"));
-            } else {
-                result.unwrap();
-                assert_eq!(*deleted.lock().unwrap(), vec![1000, 1]);
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn scan_releases_groups_audio_across_pages_and_reports_invalid_release_ids() {
+    async fn scan_releases_collects_all_audio_errors_and_propagates_late_listing_failures() {
+        let memory = Arc::new(InMemory::new());
         let release = validate_import_release(vec![sample_audio(&sample_metadata())]).unwrap();
-        let id = release.id().clone();
-        let first_key = format!("space #/{id}/22222222-2222-4222-8222-222222222222.wav");
-        let second_key = format!("space #/{id}/33333333-3333-4333-8333-333333333333.wav");
-        let first = mock!(Client::list_objects_v2)
-            .match_requests(|request| {
-                request.prefix() == Some("space #/") && request.continuation_token().is_none()
-            })
-            .then_compute_output(move |_| {
-                ListObjectsV2Output::builder()
-                    .is_truncated(true)
-                    .next_continuation_token("page2")
-                    .contents(Object::builder().key(&first_key).build())
-                    .build()
-            });
-        let second = mock!(Client::list_objects_v2)
-            .match_requests(|request| request.continuation_token() == Some("page2"))
-            .then_compute_output(move |_| {
-                ListObjectsV2Output::builder()
-                    .is_truncated(false)
-                    .contents(Object::builder().key(&second_key).build())
-                    .contents(Object::builder().key("space #/invalid/audio.wav").build())
-                    .contents(Object::builder().key("space #/README.txt").build())
-                    .build()
-            });
-        let get = mock!(Client::get_object).then_output(|| {
-            GetObjectOutput::builder()
-                .body(ByteStream::from_static(b"corrupt"))
-                .build()
-        });
-        let client = mock_client!(aws_sdk_s3, RuleMode::MatchAny, [&first, &second, &get]);
-        let storage = storage(client);
-        let results = storage
+        for name in [
+            "8d42d700-ea25-45a3-bb86-00e916339e7c",
+            "229fc612-8a56-45d0-bf61-55b36ff3dcba",
+        ] {
+            memory
+                .put(
+                    &Path::from(format!("content/{}/{name}.wav", release.id())),
+                    b"corrupt".as_slice().into(),
+                )
+                .await
+                .unwrap();
+        }
+        memory
+            .put(
+                &Path::from("content/invalid/audio.wav"),
+                b"corrupt".as_slice().into(),
+            )
+            .await
+            .unwrap();
+        let storage_ok = storage(memory.clone(), "content");
+        let scanned = storage_ok
             .scan_releases()
             .try_collect::<Vec<_>>()
             .await
             .unwrap();
-        assert_eq!(results.len(), 2);
+        assert_eq!(scanned.len(), 2);
+        assert!(scanned.iter().any(|result| matches!(result, Err(ReleaseScanFailure::Audio { failures, .. }) if failures.len() == 2)));
         assert!(
-            results
+            scanned
                 .iter()
                 .any(|result| matches!(result, Err(ReleaseScanFailure::InvalidId { .. })))
         );
-        assert!(results.iter().any(|result| matches!(result, Err(ReleaseScanFailure::Audio { id: failed, failures }) if failed == &id && failures.len() == 2)));
-        assert_eq!(get.num_calls(), 2);
-        assert_eq!(first.num_calls(), 1);
-        assert_eq!(second.num_calls(), 1);
-    }
-
-    #[tokio::test]
-    async fn scan_releases_returns_error_if_a_later_listing_page_fails() {
-        let first = mock!(Client::list_objects_v2)
-            .match_requests(|request| request.continuation_token().is_none())
-            .then_output(|| {
-                ListObjectsV2Output::builder()
-                    .is_truncated(true)
-                    .next_continuation_token("page2")
-                    .build()
-            });
-        let second = mock!(Client::list_objects_v2)
-            .match_requests(|request| request.continuation_token() == Some("page2"))
-            .then_error(|| {
-                ListObjectsV2Error::generic(
-                    aws_sdk_s3::error::ErrorMetadata::builder()
-                        .code("AccessDenied")
-                        .build(),
-                )
-            });
-        let client = mock_client!(aws_sdk_s3, RuleMode::MatchAny, [&first, &second]);
-        let storage = storage(client);
+        let mut fault = TestStore::new(memory);
+        fault.fail_list = true;
         assert!(
-            storage
+            storage(Arc::new(fault), "content")
                 .scan_releases()
                 .try_collect::<Vec<_>>()
                 .await
                 .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn scan_releases_skips_large_payload_and_reads_trailing_tags_with_bounded_ranges() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = sample_metadata();
+        let mut header = sample_audio(&source);
+        let data = header
+            .windows(4)
+            .position(|chunk| chunk == b"data")
+            .unwrap();
+        let original = u32::from_le_bytes(header[data + 4..data + 8].try_into().unwrap());
+        let tail = header[data + 8 + original as usize..].to_vec();
+        let payload_length = 256_u32 * 1024 * 1024;
+        let tail_offset = data as u64 + 8 + u64::from(payload_length);
+        let length = tail_offset + tail.len() as u64;
+        header[4..8].copy_from_slice(&((length - 8) as u32).to_le_bytes());
+        header[data + 4..data + 8].copy_from_slice(&payload_length.to_le_bytes());
+        let release = validate_import_release(vec![sample_audio(&source)]).unwrap();
+        let release_dir = directory.path().join(release.id().as_ref());
+        std::fs::create_dir(&release_dir).unwrap();
+        let mut file =
+            File::create(release_dir.join("229fc612-8a56-45d0-bf61-55b36ff3dcba.wav")).unwrap();
+        file.write_all(&header[..data + 8]).unwrap();
+        file.seek(SeekFrom::Start(tail_offset)).unwrap();
+        file.write_all(&tail).unwrap();
+        let store = Arc::new(TestStore::new(Arc::new(
+            LocalFileSystem::new_with_prefix(directory.path()).unwrap(),
+        )));
+        let storage = storage(store.clone(), "");
+        let mut releases = storage
+            .scan_releases()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+        assert_eq!(releases.len(), 1);
+        let parsed = releases.pop().unwrap().unwrap();
+        assert_eq!(parsed.id(), release.id());
+        assert_eq!(parsed.title(), source.release_title());
+        assert_eq!(parsed.tracks().len(), 1);
+        assert_eq!(parsed.tracks()[0].title(), source.track_title());
+        let ranges = store.ranges.lock().unwrap();
+        assert!(ranges.iter().any(|range| range.start >= tail_offset));
+        assert!(
+            ranges
+                .iter()
+                .all(|range| range.start < 8192 || range.start >= tail_offset)
+        );
+        assert!(
+            ranges
+                .iter()
+                .map(|range| range.end - range.start)
+                .sum::<u64>()
+                < 64 * 1024
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_staging_preserves_other_releases_until_all_staging_is_requested() {
+        let memory = Arc::new(InMemory::new());
+        let storage = storage(memory.clone(), "content");
+        let first = sample_metadata();
+        let mut second = first.clone();
+        second.release_title_mut().push_str(" other");
+        let first_audio = sample_import_audio(sample_audio(&first));
+        let first_id = first_audio.release_id().clone();
+        storage.stage_audio(first_audio).await.unwrap();
+        storage
+            .stage_audio(sample_import_audio(sample_audio(&second)))
+            .await
+            .unwrap();
+        storage.delete_staging(Some(&first_id)).await.unwrap();
+        storage.delete_staging(Some(&first_id)).await.unwrap();
+        let remaining = memory.list(None).try_collect::<Vec<_>>().await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert!(!remaining[0].location.as_ref().contains(first_id.as_ref()));
+        storage.delete_staging(None).await.unwrap();
+        storage.delete_staging(None).await.unwrap();
+        assert!(
+            memory
+                .list(None)
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap()
+                .is_empty()
         );
     }
 }

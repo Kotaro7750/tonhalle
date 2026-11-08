@@ -2,14 +2,14 @@
 
 use std::{
     collections::BTreeMap,
-    fs::{read, symlink_metadata},
-    io::{Error as IoError, ErrorKind},
+    fs::{File, symlink_metadata},
+    io::{BufReader, Error as IoError, ErrorKind},
     path::{Component, Path, PathBuf, StripPrefixError},
 };
 use tokio::task::spawn_blocking;
 
 use crate::{
-    domain::primitive::audio_file::MediaType,
+    domain::{import::AudioReader, primitive::audio_file::MediaType},
     port::import_source::{
         ImportCandidate, ImportSource, ListImportReleasesError, ReadImportAudioError,
     },
@@ -108,11 +108,11 @@ impl ImportSource for FileSystemImportSource {
             .map_err(ListImportReleasesError::new)
     }
 
-    /// Reads source bytes without blocking an asynchronous runtime worker.
-    async fn read_audio(&self, key: &str) -> Result<Vec<u8>, ReadImportAudioError> {
+    /// Opens a source without blocking an asynchronous runtime worker.
+    async fn open_audio(&self, key: &str) -> Result<Box<dyn AudioReader>, ReadImportAudioError> {
         let source = self.clone();
         let audio_key = key.to_owned();
-        spawn_blocking(move || source.read_audio_blocking(&audio_key))
+        spawn_blocking(move || source.open_audio_blocking(&audio_key))
             .await
             .map_err(|source| ReadImportAudioError::Internal {
                 key: key.to_owned(),
@@ -122,8 +122,8 @@ impl ImportSource for FileSystemImportSource {
 }
 
 impl FileSystemImportSource {
-    /// Rejects links and paths outside the root before reading original bytes.
-    fn read_audio_blocking(&self, key: &str) -> Result<Vec<u8>, ReadImportAudioError> {
+    /// Rejects links and paths outside the root before opening the source.
+    fn open_audio_blocking(&self, key: &str) -> Result<Box<dyn AudioReader>, ReadImportAudioError> {
         let path = Path::new(key);
         if path.is_absolute()
             || path
@@ -147,7 +147,8 @@ impl FileSystemImportSource {
                 key: key.to_owned(),
             });
         }
-        read(path).map_err(|source| read_audio_error(key, source))
+        let file = File::open(path).map_err(|source| read_audio_error(key, source))?;
+        Ok(Box::new(BufReader::new(file)))
     }
 }
 
@@ -175,15 +176,17 @@ mod tests {
         io::{Error as IoError, ErrorKind},
     };
 
+    use std::io::Read;
+
     use super::*;
 
     #[tokio::test]
-    async fn read_audio_distinguishes_invalid_keys_missing_objects_and_invalid_objects() {
+    async fn open_audio_distinguishes_invalid_keys_missing_objects_and_invalid_objects() {
         let root = tempfile::tempdir().unwrap();
         let source = FileSystemImportSource::new(root.path().to_owned()).unwrap();
-        assert!(matches!(source.read_audio("../outside.wav").await,
+        assert!(matches!(source.open_audio("../outside.wav").await,
             Err(ReadImportAudioError::InvalidKey { key }) if key == "../outside.wav"));
-        let missing = source.read_audio("missing.wav").await.unwrap_err();
+        let missing = source.open_audio("missing.wav").await.err().unwrap();
         assert!(
             matches!(&missing, ReadImportAudioError::NotFound { key, .. } if key == "missing.wav")
         );
@@ -197,7 +200,7 @@ mod tests {
             ErrorKind::NotFound
         );
         create_dir(root.path().join("directory.wav")).unwrap();
-        assert!(matches!(source.read_audio("directory.wav").await,
+        assert!(matches!(source.open_audio("directory.wav").await,
             Err(ReadImportAudioError::InvalidObject { key }) if key == "directory.wav"));
     }
 
@@ -219,7 +222,7 @@ mod tests {
         assert!(cause.source().is_some());
     }
     #[tokio::test]
-    async fn list_releases_groups_direct_audio_children_and_read_audio_preserves_bytes() {
+    async fn list_releases_groups_direct_audio_children_and_open_audio_preserves_bytes() {
         let root = tempfile::tempdir().unwrap();
         for (path, bytes) in [
             ("artist/album/one.WAV", b"first".as_slice()),
@@ -244,8 +247,19 @@ mod tests {
                 vec!["artist/album/disc/tone.mp3"]
             ]
         );
-        assert_eq!(source.read_audio(&groups[0][0]).await.unwrap(), b"first");
-        assert_eq!(source.read_audio(&groups[1][0]).await.unwrap(), b"nested");
+        for (key, expected) in [
+            (&groups[0][0], b"first".as_slice()),
+            (&groups[1][0], b"nested".as_slice()),
+        ] {
+            let mut bytes = Vec::new();
+            source
+                .open_audio(key)
+                .await
+                .unwrap()
+                .read_to_end(&mut bytes)
+                .unwrap();
+            assert_eq!(bytes, expected);
+        }
         assert_eq!(
             std::fs::read(root.path().join("artist/album/one.WAV")).unwrap(),
             b"first"

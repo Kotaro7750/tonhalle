@@ -105,7 +105,7 @@ pub(crate) enum ReleaseScanFailure {
 /// Scans complete domain releases independently of physical storage representation.
 #[async_trait::async_trait]
 pub(crate) trait MusicStorage: Send + Sync {
-    /// Stages one validated audio under its release identity, consuming its bytes.
+    /// Streams one validated audio into staging under its release identity.
     async fn stage_audio(&self, audio: ImportAudio) -> Result<(), SaveReleaseError>;
 
     /// Publishes staged audio without overwriting an existing release.

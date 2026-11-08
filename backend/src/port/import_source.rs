@@ -2,6 +2,8 @@
 
 use std::error;
 
+use crate::domain::import::AudioReader;
+
 /// A failure to enumerate the complete set of import candidates.
 #[derive(Debug, thiserror::Error)]
 #[error("listing import releases: {0}")]
@@ -57,11 +59,11 @@ impl ImportCandidate {
     }
 }
 
-/// Provides candidates and bytes from independent read-only storage.
+/// Provides candidates and seekable audio from independent read-only storage.
 #[async_trait::async_trait]
 pub(crate) trait ImportSource: Send + Sync {
     /// Enumerates release groupings within the configured scope.
     async fn list_releases(&self) -> Result<Vec<ImportCandidate>, ListImportReleasesError>;
-    /// Reads the original audio bytes using an opaque locator.
-    async fn read_audio(&self, key: &str) -> Result<Vec<u8>, ReadImportAudioError>;
+    /// Opens a seekable source without reading its complete contents.
+    async fn open_audio(&self, key: &str) -> Result<Box<dyn AudioReader>, ReadImportAudioError>;
 }

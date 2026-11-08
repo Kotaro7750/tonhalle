@@ -1,12 +1,20 @@
 //! Validates individual import audio and accumulates release constraints without retaining bytes.
 
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    io::{self, Read, Seek},
+};
 
 use crate::domain::{
     id::{ReleaseId, TrackId},
     ingestion::{IngestTrackError, parse_audio},
     primitive::{audio_file::AudioProperties, release::ReleaseMetadata},
 };
+
+/// A seekable audio source independent of its physical storage.
+pub(crate) trait AudioReader: Read + Seek + Send {}
+
+impl<T: Read + Seek + Send> AudioReader for T {}
 
 /// A rejected import candidate, leaving every source unchanged.
 #[derive(Debug, thiserror::Error)]
@@ -37,15 +45,15 @@ pub(crate) struct ImportAudio {
     #[getset(get = "pub(crate)")]
     /// Describes the validated media format and playback properties.
     properties: AudioProperties,
-    #[getset(get = "pub(crate)")]
-    /// Preserves the original source for its staging write.
-    bytes: Vec<u8>,
+    /// Keeps the source open until its staging transfer completes.
+    reader: Box<dyn AudioReader>,
 }
 
 impl ImportAudio {
-    /// Transfers the original bytes to the storage adapter without copying them.
-    pub(crate) fn into_bytes(self) -> Vec<u8> {
-        self.bytes
+    /// Rewinds and transfers the validated source for streaming its original bytes.
+    pub(crate) fn into_reader(mut self) -> io::Result<Box<dyn AudioReader>> {
+        self.reader.rewind()?;
+        Ok(self.reader)
     }
 }
 
@@ -63,15 +71,21 @@ pub(crate) struct ImportedReleaseValidator {
 
 impl ImportedReleaseValidator {
     /// Parses one source and remembers failures while allowing subsequent validation.
-    pub(crate) fn push(&mut self, bytes: Vec<u8>) -> Result<ImportAudio, ImportValidationError> {
-        let result = self.validate(bytes);
+    pub(crate) fn push(
+        &mut self,
+        reader: impl AudioReader + 'static,
+    ) -> Result<ImportAudio, ImportValidationError> {
+        let result = self.validate(reader);
         self.failed |= result.is_err();
         result
     }
 
     /// Checks source metadata before constructing audio eligible for staging.
-    fn validate(&mut self, bytes: Vec<u8>) -> Result<ImportAudio, ImportValidationError> {
-        let (track, metadata, properties) = parse_audio(&bytes)?.into_parts();
+    fn validate(
+        &mut self,
+        mut reader: impl AudioReader + 'static,
+    ) -> Result<ImportAudio, ImportValidationError> {
+        let (track, metadata, properties) = parse_audio(&mut reader)?.into_parts();
         if self
             .metadata
             .as_ref()
@@ -87,7 +101,7 @@ impl ImportedReleaseValidator {
         Ok(ImportAudio {
             release_id,
             properties,
-            bytes,
+            reader: Box::new(reader),
         })
     }
 
@@ -103,6 +117,8 @@ impl ImportedReleaseValidator {
 /// Verifies release-level import constraints independently of metadata field validation.
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
     use crate::{domain::ingestion::metadata::sample_metadata, test_support::sample_audio};
 
@@ -120,10 +136,10 @@ mod tests {
     fn imported_release_validator_rejects_duplicate_audio() {
         let mut validator = ImportedReleaseValidator::default();
         let audio = sample_audio(&sample_metadata());
-        validator.push(audio.clone()).unwrap();
+        validator.push(Cursor::new(audio.clone())).unwrap();
 
         assert!(matches!(
-            validator.push(audio),
+            validator.push(Cursor::new(audio)),
             Err(ImportValidationError::DuplicateTrack(_))
         ));
     }
@@ -131,8 +147,10 @@ mod tests {
     #[test]
     fn imported_release_validator_rejects_release_after_invalid_then_valid_audio() {
         let mut validator = ImportedReleaseValidator::default();
-        assert!(validator.push(b"invalid".to_vec()).is_err());
-        validator.push(sample_audio(&sample_metadata())).unwrap();
+        assert!(validator.push(Cursor::new(b"invalid".to_vec())).is_err());
+        validator
+            .push(Cursor::new(sample_audio(&sample_metadata())))
+            .unwrap();
 
         assert!(matches!(
             validator.finish(),
@@ -148,13 +166,13 @@ mod tests {
         let first_audio = sample_audio(&first);
         let second_audio = sample_audio(&second);
         ImportedReleaseValidator::default()
-            .push(second_audio.clone())
+            .push(Cursor::new(second_audio.clone()))
             .unwrap();
         let mut validator = ImportedReleaseValidator::default();
-        validator.push(first_audio).unwrap();
+        validator.push(Cursor::new(first_audio)).unwrap();
 
         assert!(matches!(
-            validator.push(second_audio),
+            validator.push(Cursor::new(second_audio)),
             Err(ImportValidationError::MetadataMismatch)
         ));
     }

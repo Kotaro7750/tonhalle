@@ -1,6 +1,8 @@
 //! Defines shared stored-audio configuration independently of the consuming command.
 
 use clap::Args;
+use object_store::aws::AmazonS3Builder;
+use object_store_aws::AwsCredentials;
 use std::{io::Error as IoError, path::PathBuf, sync::Arc};
 use url::Url;
 
@@ -192,6 +194,12 @@ pub(crate) enum S3MusicStorageConfigError {
     /// The object namespace cannot contain empty or dot path segments.
     #[error("S3MusicStorageConfig.prefix must contain nonempty path segments without dot segments")]
     InvalidPrefix,
+    /// The AWS credential provider could not be initialized.
+    #[error("initializing AWS credentials: {0}")]
+    Credentials(#[from] object_store_aws::Error),
+    /// The object-store client could not be constructed.
+    #[error("constructing S3 object store: {0}")]
+    Construct(#[from] object_store::Error),
 }
 
 /// Shared S3 settings for importing and serving stored music.
@@ -258,11 +266,25 @@ impl MusicStorageImplementation for S3MusicStorageConfig {
             ))
             .load()
             .await;
+        let credentials = AwsCredentials::from_config(config)
+            .await
+            .map_err(S3MusicStorageConfigError::Credentials)?;
+        let store = AmazonS3Builder::new()
+            .with_region(
+                self.region
+                    .as_ref()
+                    .ok_or(S3MusicStorageConfigError::MissingRegion)?,
+            )
+            .with_bucket_name(
+                self.bucket_name
+                    .as_ref()
+                    .ok_or(S3MusicStorageConfigError::MissingBucketName)?,
+            )
+            .with_credentials(Arc::new(credentials))
+            .build()
+            .map_err(S3MusicStorageConfigError::Construct)?;
         Ok(Arc::new(S3MusicStorage::new(
-            aws_sdk_s3::Client::new(&config),
-            self.bucket_name
-                .clone()
-                .ok_or(S3MusicStorageConfigError::MissingBucketName)?,
+            Arc::new(store),
             self.prefix.clone().unwrap_or_default(),
             playback_url_base,
         )))

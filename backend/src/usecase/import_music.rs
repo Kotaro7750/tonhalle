@@ -1,6 +1,7 @@
 //! Imports independent release candidates without accessing the metadata index.
 
 use std::{collections::HashSet, sync::Arc};
+use tokio::task::spawn_blocking;
 
 use crate::{
     domain::{
@@ -188,11 +189,29 @@ async fn validate_and_stage_candidate(
     let mut external_failure = false;
 
     for audio_key in candidate.audio_keys() {
-        let audio = source
-            .read_audio(audio_key)
-            .await
-            .map_err(ImportCandidateError::from)
-            .and_then(|bytes| validator.push(bytes).map_err(ImportCandidateError::from));
+        let audio = match source.open_audio(audio_key).await {
+            Err(error) => Err(ImportCandidateError::Read(error)),
+            Ok(reader) => {
+                let mut owned_validator = std::mem::take(&mut validator);
+                match spawn_blocking(move || {
+                    let result = owned_validator.push(reader);
+                    (owned_validator, result)
+                })
+                .await
+                {
+                    Ok((updated, result)) => {
+                        validator = updated;
+                        result.map_err(ImportCandidateError::from)
+                    }
+                    Err(source) => {
+                        Err(ImportCandidateError::Read(ReadImportAudioError::Internal {
+                            key: audio_key.clone(),
+                            source: Box::new(source),
+                        }))
+                    }
+                }
+            }
+        };
 
         let checked = async {
             let audio = audio?;
@@ -236,12 +255,18 @@ async fn validate_and_stage_candidate(
 /// Verifies incremental validation, persistence boundaries, and cleanup.
 #[cfg(test)]
 mod tests {
-    use std::{collections::VecDeque, io::Error as IoError, sync::Mutex};
+    use std::{
+        collections::VecDeque,
+        io::{Cursor, Error as IoError, Read},
+        sync::Mutex,
+    };
 
     use super::*;
     use crate::{
         domain::{
-            import::ImportAudio, ingestion::metadata::sample_metadata, primitive::release::Release,
+            import::{AudioReader, ImportAudio},
+            ingestion::metadata::sample_metadata,
+            primitive::release::Release,
         },
         port::music_storage::{ReleaseScanFailure, ScanReleasesError},
         test_support::sample_audio,
@@ -269,20 +294,23 @@ mod tests {
                 .collect())
         }
 
-        async fn read_audio(&self, key: &str) -> Result<Vec<u8>, ReadImportAudioError> {
+        async fn open_audio(
+            &self,
+            key: &str,
+        ) -> Result<Box<dyn AudioReader>, ReadImportAudioError> {
             self.reads.lock().unwrap().push(key.into());
             self.events.lock().unwrap().push("read");
             if key == "unreadable" {
                 return Err(ReadImportAudioError::InvalidObject { key: key.into() });
             }
             if key == "invalid" {
-                return Ok(b"invalid".to_vec());
+                return Ok(Box::new(Cursor::new(b"invalid".to_vec())));
             }
             let mut metadata = sample_metadata();
             let (release, track) = key.split_once('/').unwrap();
             metadata.release_title_mut().push_str(release);
             *metadata.track_number_mut() = track.into();
-            Ok(sample_audio(&metadata))
+            Ok(Box::new(Cursor::new(sample_audio(&metadata))))
         }
     }
 
@@ -303,7 +331,13 @@ mod tests {
         async fn stage_audio(&self, audio: ImportAudio) -> Result<(), SaveReleaseError> {
             let id = audio.release_id().clone();
             self.events.lock().unwrap().push("stage");
-            self.staged.lock().unwrap().push(audio.into_bytes());
+            let mut bytes = Vec::new();
+            audio
+                .into_reader()
+                .unwrap()
+                .read_to_end(&mut bytes)
+                .unwrap();
+            self.staged.lock().unwrap().push(bytes);
             if self.fail_stage {
                 return Err(SaveReleaseError::Conflict { id: id.clone() });
             }
@@ -512,5 +546,120 @@ mod tests {
         ));
         assert!(storage.staged.lock().unwrap().is_empty());
         assert!(storage.deleted.lock().unwrap().is_empty());
+    }
+}
+
+/// Measures actual source reads across validation-only and streaming import paths.
+#[cfg(test)]
+mod streaming_tests {
+    use std::{
+        fs::File,
+        io::{self, BufReader, Read, Seek, SeekFrom},
+        path::PathBuf,
+        sync::{
+            Arc,
+            atomic::{AtomicU64, AtomicUsize, Ordering},
+        },
+    };
+
+    use super::*;
+    use crate::{
+        domain::{import::AudioReader, ingestion::metadata::sample_metadata},
+        infrastructure::music_storage::filesystem::FileSystemMusicStorage,
+        test_support::write_sparse_audio,
+    };
+
+    /// Counts bytes delivered to consumers while retaining ordinary file seeking.
+    struct CountedReader {
+        reader: BufReader<File>,
+        bytes_read: Arc<AtomicU64>,
+        largest_read: Arc<AtomicUsize>,
+    }
+
+    impl Read for CountedReader {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            self.largest_read.fetch_max(buffer.len(), Ordering::Relaxed);
+            let count = self.reader.read(buffer)?;
+            self.bytes_read.fetch_add(count as u64, Ordering::Relaxed);
+            Ok(count)
+        }
+    }
+
+    impl Seek for CountedReader {
+        fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+            self.reader.seek(position)
+        }
+    }
+
+    /// Opens the same on-disk source independently for each workflow.
+    struct CountedSource {
+        path: PathBuf,
+        bytes_read: Arc<AtomicU64>,
+        largest_read: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl ImportSource for CountedSource {
+        async fn list_releases(&self) -> Result<Vec<ImportCandidate>, ListImportReleasesError> {
+            Ok(vec![ImportCandidate::new(
+                "release".into(),
+                vec!["audio".into()],
+            )])
+        }
+
+        async fn open_audio(&self, _: &str) -> Result<Box<dyn AudioReader>, ReadImportAudioError> {
+            Ok(Box::new(CountedReader {
+                reader: BufReader::new(File::open(&self.path).unwrap()),
+                bytes_read: self.bytes_read.clone(),
+                largest_read: self.largest_read.clone(),
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn import_validates_only_metadata_and_streams_full_audio_only_when_saving() {
+        let directory = tempfile::tempdir().unwrap();
+        let source_path = directory.path().join("source.wav");
+        let mut file = File::create(&source_path).unwrap();
+        write_sparse_audio(&mut file, &sample_metadata(), 32 * 1024 * 1024);
+        let source_length = file.metadata().unwrap().len();
+        let bytes_read = Arc::new(AtomicU64::new(0));
+        let largest_read = Arc::new(AtomicUsize::new(0));
+        let source = Arc::new(CountedSource {
+            path: source_path,
+            bytes_read: bytes_read.clone(),
+            largest_read: largest_read.clone(),
+        });
+        let destination = tempfile::tempdir().unwrap();
+        let storage =
+            Arc::new(FileSystemMusicStorage::for_import(destination.path().to_owned()).unwrap());
+
+        let checked = ImportCheckUseCase::new(source.clone())
+            .execute()
+            .await
+            .unwrap();
+        assert_eq!(checked.releases().len(), 1);
+        assert_eq!(checked.failed(), 0);
+        assert!(bytes_read.swap(0, Ordering::Relaxed) < 64 * 1024);
+
+        let importer = ImportMusicUseCase::new(source, storage);
+        let dry_run = importer.execute(true).await.unwrap();
+        assert_eq!(dry_run.saved(), 1);
+        assert!(bytes_read.swap(0, Ordering::Relaxed) < 64 * 1024);
+        assert_eq!(std::fs::read_dir(destination.path()).unwrap().count(), 0);
+
+        let imported = importer.execute(false).await.unwrap();
+        assert_eq!(imported.saved(), 1);
+        let count = bytes_read.load(Ordering::Relaxed);
+        assert!(count >= source_length && count < source_length + 64 * 1024);
+        assert!(largest_read.load(Ordering::Relaxed) <= 64 * 1024);
+        let release_id = checked.releases()[0].1.id();
+        let saved = std::fs::read_dir(destination.path().join(release_id.as_ref()))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.metadata().unwrap().len(), source_length);
+        assert!(!destination.path().join(".tonhalle-import").exists());
     }
 }

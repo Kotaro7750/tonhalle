@@ -35,7 +35,9 @@ tonhalle-backend import \
   --music-storage--root-path /path/to/storage
 ```
 
-Audio is read and validated one file at a time, then staged under its release ID without accumulating audio bytes in memory.
+Source validation reads embedded metadata and audio properties one file at a time without loading complete audio files into memory.
+When saving, the original bytes are streamed into staging under the release ID.
+Validation does not decode every audio frame to check the entire audio payload for corruption.
 A release is published only after all of its audio passes validation and staging.
 After the first read, validation, or staging failure in a release, remaining audio is still checked but is not staged.
 Temporary audio is deleted after all candidates have been processed; cleanup failures make the command fail.
@@ -50,6 +52,7 @@ Start or restart the API server after importing to rebuild the index.
 
 Add `--dry-run` to check source releases and destination save conditions without writing files or objects.
 This option still requires music-storage configuration and reports `saved` counts as if the releases had been saved.
+Like `import-check`, it reads only the source data needed for metadata validation and does not stream the full audio for saving.
 
 ### Import Check
 
@@ -174,6 +177,7 @@ Implementation-specific settings are required and validated only for the selecte
 
 Credentials are loaded through the AWS SDK's standard credential provider chain, such as environment variables, shared AWS profiles, or IAM roles.
 The bucket must allow listing objects, reading audio for `server`, and uploading, copying, and deleting temporary audio for `import` (including the read permission required for copying).
+Streaming uploads also require `s3:AbortMultipartUpload` to clean up incomplete multipart uploads after a transfer failure.
 
 Audio objects are stored at `{prefix}/{ReleaseId}/{AudioFileId}.{extension}`; an empty prefix omits the initial `{prefix}/`.
 Playback URLs append the complete object key to the configured playback URL base.

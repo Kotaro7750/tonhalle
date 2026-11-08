@@ -8,7 +8,7 @@ use lofty::{
     probe::Probe,
     tag::ItemKey,
 };
-use std::io::{Cursor, Error as IoError};
+use std::io::{Error as IoError, Read, Seek};
 
 use crate::domain::primitive::audio_file::MediaType;
 
@@ -108,14 +108,18 @@ pub(crate) enum ExtractMetadataError {
     Detect(#[source] IoError),
 }
 
-/// Extracts embedded metadata from audio bytes without accessing physical storage.
-pub(crate) fn extract_metadata(bytes: &[u8]) -> Result<RawMetadata, ExtractMetadataError> {
-    let probe = Probe::new(Cursor::new(bytes))
+/// Extracts tags and playback properties from a seekable source without retaining audio data.
+pub(crate) fn extract_metadata(
+    reader: impl Read + Seek,
+) -> Result<RawMetadata, ExtractMetadataError> {
+    let options = ParseOptions::new().read_cover_art(false);
+    let probe = Probe::new(reader)
+        .options(options)
         .guess_file_type()
         .map_err(ExtractMetadataError::Detect)?;
     let (file, wav_bitrate): (TaggedFile, Option<u64>) = if probe.file_type() == Some(FileType::Wav)
     {
-        let wav = WavFile::read_from(&mut Cursor::new(bytes), ParseOptions::new())
+        let wav = WavFile::read_from(&mut probe.into_inner(), options)
             .map_err(ExtractMetadataError::Parse)?;
         let bitrate = bitrate(wav.properties());
         (wav.into(), bitrate)
@@ -232,8 +236,67 @@ pub(crate) fn sample_metadata() -> RawMetadata {
 /// Verifies extraction preserves source values before domain validation.
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
     use crate::test_support::sample_audio;
+
+    /// Rejects extraction that reads through a large audio payload instead of seeking past it.
+    struct LimitedRead<R> {
+        inner: R,
+        remaining: usize,
+    }
+
+    impl<R: Read> Read for LimitedRead<R> {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            let count = self.inner.read(buffer)?;
+            self.remaining = self
+                .remaining
+                .checked_sub(count)
+                .expect("audio payload was read");
+            Ok(count)
+        }
+    }
+
+    impl<R: Seek> Seek for LimitedRead<R> {
+        fn seek(&mut self, position: std::io::SeekFrom) -> std::io::Result<u64> {
+            self.inner.seek(position)
+        }
+    }
+
+    #[test]
+    fn extract_metadata_skips_large_audio_payload() {
+        use std::io::{SeekFrom, Write};
+
+        let source = sample_metadata();
+        let mut bytes = sample_audio(&source);
+        let data = bytes.windows(4).position(|chunk| chunk == b"data").unwrap();
+        let original_len = u32::from_le_bytes(bytes[data + 4..data + 8].try_into().unwrap());
+        let tail = bytes[data + 8 + original_len as usize..].to_vec();
+        let payload_len = 256_u32 * 1024 * 1024;
+        bytes[data + 4..data + 8].copy_from_slice(&payload_len.to_le_bytes());
+        let tail_offset = data as u64 + 8 + u64::from(payload_len);
+        let file_len = tail_offset + tail.len() as u64;
+        bytes[4..8].copy_from_slice(&((file_len - 8) as u32).to_le_bytes());
+        let mut file = tempfile::tempfile().unwrap();
+        file.write_all(&bytes[..data + 8]).unwrap();
+        file.seek(SeekFrom::Start(tail_offset)).unwrap();
+        file.write_all(&tail).unwrap();
+        file.seek(SeekFrom::Start(0)).unwrap();
+
+        let extracted = extract_metadata(LimitedRead {
+            inner: file,
+            remaining: 64 * 1024,
+        })
+        .unwrap();
+
+        assert_eq!(extracted.release_title(), source.release_title());
+        assert_eq!(extracted.track_title(), source.track_title());
+        assert_eq!(
+            extracted.audio().sample_rate(),
+            source.audio().sample_rate()
+        );
+    }
 
     #[test]
     fn extract_metadata_preserves_missing_and_invalid_metadata_without_validation() {
@@ -253,7 +316,7 @@ mod tests {
         *invalid.disc_number_mut() = "0".into();
 
         let audio = sample_audio(&invalid);
-        let extracted = extract_metadata(&audio).unwrap();
+        let extracted = extract_metadata(Cursor::new(&audio)).unwrap();
 
         assert!(extracted.release_title().is_empty());
         assert_eq!(extracted.release_date().as_deref(), Some("2026-02-29"));
@@ -282,7 +345,7 @@ mod tests {
             let mut fixture = source.clone();
             *fixture.audio_mut().bitrate_mut() = Some(stored_bitrate);
 
-            let extracted = extract_metadata(&sample_audio(&fixture)).unwrap();
+            let extracted = extract_metadata(Cursor::new(sample_audio(&fixture))).unwrap();
 
             assert_eq!(
                 extracted.audio().sample_rate(),
@@ -373,7 +436,7 @@ mod tests {
             }
             tag.save_to_path(&path, WriteOptions::new()).unwrap();
 
-            let extracted = extract_metadata(&read(&path).unwrap()).unwrap();
+            let extracted = extract_metadata(Cursor::new(read(&path).unwrap())).unwrap();
             assert_eq!(
                 extracted.track_title(),
                 fixture.track_title(),
@@ -408,7 +471,7 @@ mod tests {
                 bytes[21] &= 0xf0;
                 bytes[22..26].fill(0);
                 write(&path, bytes).unwrap();
-                let unknown = extract_metadata(&read(&path).unwrap()).unwrap();
+                let unknown = extract_metadata(Cursor::new(read(&path).unwrap())).unwrap();
                 assert_eq!(unknown.audio().duration_ms(), None);
                 assert_eq!(unknown.audio().bitrate(), None);
             }
