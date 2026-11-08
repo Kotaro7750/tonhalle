@@ -280,6 +280,13 @@ impl MusicStorageImplementation for S3MusicStorageConfig {
                     .as_ref()
                     .ok_or(S3MusicStorageConfigError::MissingBucketName)?,
             )
+            // Use a dual-stack endpoint so S3 remains reachable in IPv6-only environments.
+            .with_endpoint(format!(
+                "https://s3.dualstack.{}.amazonaws.com",
+                self.region
+                    .as_ref()
+                    .ok_or(S3MusicStorageConfigError::MissingRegion)?
+            ))
             .with_credentials(Arc::new(credentials))
             .build()
             .map_err(S3MusicStorageConfigError::Construct)?;
