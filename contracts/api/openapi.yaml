@@ -1,7 +1,7 @@
 openapi: "3.1.0"
 info:
   title: "Tonhalle API"
-  version: "0.3.0"
+  version: "0.4.0"
   license:
     name: "MIT"
     identifier: "MIT"
@@ -14,6 +14,8 @@ security:
   - {}
   - BearerAuth: []
 tags:
+  - name: "Artists"
+    description: "アーティストに関連するAPI"
   - name: ContentAccess
     description: 配信エンドポイントへのアクセス設定
   - name: "Releases"
@@ -82,6 +84,84 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  "/artists":
+    get:
+      operationId: "listArtists"
+      tags:
+        - "Artists"
+      summary: "アーティスト一覧の取得"
+      description: |
+        Releaseのアーティストクレジットに含まれるアーティストをidの昇順でページごとに取得する。
+        Trackのみにクレジットされたアーティストは含めない。
+        同じアーティストが複数のReleaseにクレジットされていても、同じidは1件として返す。
+        各ページはリクエスト時点の一覧を対象とし、一連の取得を通じたスナップショットは保証しない。
+      parameters:
+        - "$ref": "#/components/parameters/Cursor"
+        - "$ref": "#/components/parameters/PageLimit"
+      responses:
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "200":
+          description: "アーティスト一覧の取得に成功した"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ArtistPage"
+              examples:
+                firstPage:
+                  summary: "続きがあるページ"
+                  value:
+                    items:
+                      - id: "artist-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        name: "Example Artist"
+                    nextCursor: "opaque-artist-cursor"
+                lastPage:
+                  summary: "最終ページ"
+                  value:
+                    items:
+                      - id: "artist-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        name: "Example Artist"
+                empty:
+                  summary: "アーティストがいない場合"
+                  value:
+                    items: []
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "500":
+          "$ref": "#/components/responses/InternalServerError"
+  "/artists/{artistId}":
+    get:
+      operationId: "getArtist"
+      tags:
+        - "Artists"
+      summary: "アーティスト詳細の取得"
+      description: |
+        指定したアーティストの情報を取得する。
+        Releaseのアーティストクレジットに含まれるアーティストのみを対象とする。
+        指定したidがReleaseのアーティストクレジットに存在しない場合には404を返す。
+      parameters:
+        - "$ref": "#/components/parameters/ArtistId"
+      responses:
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "200":
+          description: "アーティスト詳細の取得に成功した"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Artist"
+              examples:
+                artist:
+                  summary: "Releaseにクレジットされたアーティスト"
+                  value:
+                    id: "artist-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                    name: "Example Artist"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "500":
+          "$ref": "#/components/responses/InternalServerError"
   "/releases":
     get:
       operationId: "listReleases"
@@ -90,10 +170,20 @@ paths:
       summary: "リリース一覧の取得"
       description: |
         リリース概要をidの昇順でページごとに取得する。
+        artistIdを指定した場合、Releaseのアーティストクレジットに指定したidを含むリリースのみを返す。
+        共同リリースは各アーティストの一覧に含め、Trackのクレジットのみの一致は対象としない。
+        artistIdを省略した場合は全リリースを対象とする。
+        条件に一致するリリースがない場合は、200で空のitemsを返す。
         各ページはリクエスト時点の一覧を対象とし、一連の取得を通じたスナップショットは保証しない。
       parameters:
         - "$ref": "#/components/parameters/Cursor"
         - "$ref": "#/components/parameters/PageLimit"
+        - name: "artistId"
+          in: "query"
+          required: false
+          description: "Releaseのアーティストクレジットによる絞り込みに使用するアーティストの識別子"
+          schema:
+            "$ref": "#/components/schemas/ArtistId"
       responses:
         "401":
           "$ref": "#/components/responses/Unauthorized"
@@ -243,6 +333,10 @@ components:
         取得開始位置を指定するカーソル。
         初回または先頭から取得し直す場合は省略する。
         続きの取得では前のレスポンスのnextCursorをそのまま指定し、内容を解釈してはならない。
+        カーソルは取得元の一覧APIと絞り込み条件に対応する。
+        継続リクエストでは同じAPIと絞り込み条件を使用すること。
+        異なるAPIや絞り込み条件のカーソルを指定した場合、期待した結果が得られない可能性がある。
+        絞り込み条件を変更する場合はカーソルを省略して先頭から取得し直す。
       schema:
         type: "string"
         minLength: 1
@@ -258,6 +352,13 @@ components:
         minimum: 1
         maximum: 100
         default: 30
+    ArtistId:
+      name: "artistId"
+      in: "path"
+      required: true
+      description: "Artistの識別子"
+      schema:
+        "$ref": "#/components/schemas/ArtistId"
     ReleaseId:
       name: "releaseId"
       in: "path"
@@ -331,6 +432,44 @@ components:
       type: ["integer", "null"]
       minimum: 0
       description: "トラックの再生時間（ミリ秒）。取得できない場合はnull"
+    Artist:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "name"
+      properties:
+        id:
+          "$ref": "#/components/schemas/ArtistId"
+        name:
+          "$ref": "#/components/schemas/ArtistName"
+      description: "アーティストの情報"
+    ArtistPage:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "items"
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/Artist"
+        nextCursor:
+          type: "string"
+          minLength: 1
+          description: |
+            次ページのカーソル。
+            最終ページでは省略する
+      description: |
+        カーソル方式のアーティスト一覧。
+        最終ページのitemsは空配列でもよい。
+        nextCursorを含む場合、itemsには1件以上含まれる。
+      dependentSchemas:
+        nextCursor:
+          properties:
+            items:
+              minItems: 1
+            nextCursor: {}
     ArtistCredits:
       type: "array"
       minItems: 1
@@ -563,7 +702,7 @@ components:
               type: "integer"
               const: 400
     NotFoundProblem:
-      description: "指定したリリースまたはトラックが存在しない"
+      description: "指定したリソースが存在しない"
       allOf:
         - "$ref": "#/components/schemas/Problem"
         - type: "object"
@@ -598,7 +737,7 @@ components:
             title: "Bad Request"
             status: 400
     NotFound:
-      description: "指定したリリースまたはトラックが存在しない"
+      description: "指定したリソースが存在しない"
       content:
         "application/problem+json":
           schema:
