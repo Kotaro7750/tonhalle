@@ -12,8 +12,11 @@ use error::ControllerError;
 use tonhalle_api::models;
 
 use crate::{
-    domain::id::{ReleaseId, TrackId},
-    usecase::{GetReleaseUseCase, GetTrackUseCase, ListReleasesUseCase},
+    domain::id::{ArtistId, ReleaseId, TrackId},
+    usecase::{
+        GetArtistUseCase, GetReleaseUseCase, GetTrackUseCase, ListArtistsUseCase,
+        ListReleasesUseCase,
+    },
 };
 
 pub(crate) mod content_access;
@@ -23,6 +26,8 @@ mod error;
 /// Handles music browsing requests using application query workflows.
 #[derive(Clone)]
 pub(crate) struct MusicController {
+    list_artists: ListArtistsUseCase,
+    get_artist: GetArtistUseCase,
     list_releases: ListReleasesUseCase,
     get_release: GetReleaseUseCase,
     get_track: GetTrackUseCase,
@@ -31,11 +36,15 @@ pub(crate) struct MusicController {
 impl MusicController {
     /// Connects HTTP operations to their query workflows.
     pub(crate) fn new(
+        list_artists: ListArtistsUseCase,
+        get_artist: GetArtistUseCase,
         list_releases: ListReleasesUseCase,
         get_release: GetReleaseUseCase,
         get_track: GetTrackUseCase,
     ) -> Self {
         Self {
+            list_artists,
+            get_artist,
             list_releases,
             get_release,
             get_track,
@@ -45,6 +54,8 @@ impl MusicController {
     /// Installs music API routes and problem responses for unsupported requests.
     pub(crate) fn router(self) -> Router {
         Router::new()
+            .route("/artists", get(Self::list_artists))
+            .route("/artists/{artist_id}", get(Self::get_artist))
             .route("/releases", get(Self::list_releases))
             .route("/releases/{release_id}", get(Self::get_release))
             .route("/tracks/{track_id}", get(Self::get_track))
@@ -53,23 +64,53 @@ impl MusicController {
             .with_state(self)
     }
 
+    /// Validates pagination input before returning an artist page.
+    async fn list_artists(
+        State(this): State<Self>,
+        query: Result<Query<PaginationQuery>, QueryRejection>,
+    ) -> Result<Json<models::ArtistPage>, ControllerError> {
+        let Query(query) = query.map_err(|error| ControllerError::BadRequest(error.to_string()))?;
+        let limit = query.validated_limit()?;
+
+        Ok(Json(
+            this.list_artists.execute(limit, query.cursor).await?.into(),
+        ))
+    }
+
+    /// Validates an artist identifier before returning its metadata.
+    async fn get_artist(
+        State(this): State<Self>,
+        path: Result<Path<String>, PathRejection>,
+    ) -> Result<Json<models::Artist>, ControllerError> {
+        let Path(id) = path.map_err(|error| ControllerError::BadRequest(error.to_string()))?;
+        let id = id
+            .parse::<ArtistId>()
+            .map_err(|error| ControllerError::BadRequest(error.to_string()))?;
+
+        Ok(Json(models::Artist::from(
+            &this.get_artist.execute(&id).await?,
+        )))
+    }
+
     /// Validates pagination input before returning a release page.
     async fn list_releases(
         State(this): State<Self>,
-        query: Result<Query<ListReleasesQuery>, QueryRejection>,
+        query: Result<Query<PaginationQuery>, QueryRejection>,
     ) -> Result<Json<models::ReleasePage>, ControllerError> {
         let Query(query) = query.map_err(|error| ControllerError::BadRequest(error.to_string()))?;
-        let limit = query.limit.unwrap_or(30);
-
-        if !(1..=100).contains(&limit) || query.cursor.as_ref().is_some_and(String::is_empty) {
-            return Err(ControllerError::BadRequest(
-                "invalid limit or cursor".into(),
-            ));
-        }
+        let limit = query.validated_limit()?;
 
         Ok(Json(
             this.list_releases
-                .execute(limit, query.cursor)
+                .execute(
+                    limit,
+                    query.cursor,
+                    query
+                        .artist_id
+                        .map(|id| id.parse::<ArtistId>())
+                        .transpose()
+                        .map_err(|error| ControllerError::BadRequest(error.to_string()))?,
+                )
                 .await?
                 .into(),
         ))
@@ -102,11 +143,26 @@ impl MusicController {
     }
 }
 
-/// Pagination input awaiting HTTP boundary validation.
+/// Query input awaiting HTTP boundary validation.
 #[derive(serde::Deserialize)]
-struct ListReleasesQuery {
+struct PaginationQuery {
+    #[serde(rename = "artistId")]
+    artist_id: Option<String>,
     cursor: Option<String>,
     limit: Option<u8>,
+}
+
+impl PaginationQuery {
+    /// Validates the common page bounds and continuation token.
+    fn validated_limit(&self) -> Result<u8, ControllerError> {
+        let limit = self.limit.unwrap_or(30);
+        if !(1..=100).contains(&limit) || self.cursor.as_ref().is_some_and(String::is_empty) {
+            return Err(ControllerError::BadRequest(
+                "invalid limit or cursor".into(),
+            ));
+        }
+        Ok(limit)
+    }
 }
 
 #[cfg(test)]

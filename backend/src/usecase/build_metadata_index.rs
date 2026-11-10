@@ -229,7 +229,12 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            index.list_releases(100, None).await.unwrap().items().len(),
+            index
+                .list_releases(100, None, None)
+                .await
+                .unwrap()
+                .items()
+                .len(),
             2
         );
         assert_eq!(

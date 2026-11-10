@@ -25,8 +25,9 @@ use crate::{
     controller::{MusicController, content_access::ContentAccessController},
     infrastructure::metadata_index::InMemoryMetadataIndex,
     usecase::{
-        GetReleaseUseCase, GetTrackUseCase, ListReleasesUseCase,
-        build_metadata_index::BuildMetadataIndexUseCase, content_access::ContentAccessUseCase,
+        GetArtistUseCase, GetReleaseUseCase, GetTrackUseCase, ListArtistsUseCase,
+        ListReleasesUseCase, build_metadata_index::BuildMetadataIndexUseCase,
+        content_access::ContentAccessUseCase,
     },
 };
 
@@ -63,6 +64,8 @@ pub(crate) async fn run(config: &ServerConfig) -> Result<(), ServerError> {
     let index = Arc::new(InMemoryMetadataIndex::new());
     let scan = BuildMetadataIndexUseCase::new(storage, index.clone());
     let controller = MusicController::new(
+        ListArtistsUseCase::new(index.clone()),
+        GetArtistUseCase::new(index.clone()),
         ListReleasesUseCase::new(index.clone()),
         GetReleaseUseCase::new(index.clone()),
         GetTrackUseCase::new(index),

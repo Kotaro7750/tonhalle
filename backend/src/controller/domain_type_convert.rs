@@ -114,6 +114,26 @@ impl From<metadata_index::ReleasePage> for models::ReleasePage {
     }
 }
 
+impl From<&ArtistCredit> for models::Artist {
+    /// Exposes an artist identity and its retained display name.
+    fn from(value: &ArtistCredit) -> Self {
+        Self {
+            id: value.artist_id().to_string(),
+            name: value.name().to_owned(),
+        }
+    }
+}
+
+impl From<metadata_index::ArtistPage> for models::ArtistPage {
+    /// Converts an artist page and omits the final continuation token.
+    fn from(value: metadata_index::ArtistPage) -> Self {
+        Self {
+            items: value.items().iter().map(Into::into).collect(),
+            next_cursor: value.next_cursor().map(str::to_owned),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, to_value};

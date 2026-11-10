@@ -10,12 +10,13 @@ use std::{
 
 use crate::{
     domain::{
-        id::{AudioFileId, ReleaseId, TrackId},
+        artist_credit::ArtistCredit,
+        id::{ArtistId, AudioFileId, ReleaseId, TrackId},
         primitive::{release::Release, track::Track},
     },
     port::metadata_index::{
-        AddReleaseError, GetReleaseError, GetTrackError, ListReleasesError, MetadataIndex,
-        ReleasePage,
+        AddReleaseError, ArtistPage, GetArtistError, GetReleaseError, GetTrackError,
+        ListArtistsError, ListReleasesError, MetadataIndex, ReleasePage,
     },
 };
 
@@ -28,6 +29,7 @@ pub(crate) struct InMemoryMetadataIndex {
 /// Owns releases and lookup positions under one lock.
 #[derive(Default)]
 struct IndexState {
+    artists: BTreeMap<ArtistId, ArtistCredit>,
     releases: BTreeMap<ReleaseId, Release>,
     tracks: BTreeMap<TrackId, (ReleaseId, usize)>,
     audio: HashMap<AudioFileId, ReleaseId>,
@@ -96,6 +98,12 @@ impl MetadataIndex for InMemoryMetadataIndex {
                 .audio
                 .insert(track.original_audio_file().id(), release.id().clone());
         }
+        for credit in release.artist_credits() {
+            state
+                .artists
+                .entry(credit.artist_id().clone())
+                .or_insert_with(|| credit.clone());
+        }
         state.releases.insert(release.id().clone(), release);
         Ok(())
     }
@@ -105,6 +113,7 @@ impl MetadataIndex for InMemoryMetadataIndex {
         &self,
         limit: u8,
         cursor: Option<String>,
+        artist_id: Option<ArtistId>,
     ) -> Result<ReleasePage, ListReleasesError> {
         let state = self.state.read().unwrap();
         let cursor = cursor
@@ -115,6 +124,14 @@ impl MetadataIndex for InMemoryMetadataIndex {
         let mut items = state
             .releases
             .range::<ReleaseId, _>((start, Unbounded))
+            .filter(|(_, release)| {
+                artist_id.as_ref().is_none_or(|id| {
+                    release
+                        .artist_credits()
+                        .iter()
+                        .any(|credit| credit.artist_id() == id)
+                })
+            })
             .take(usize::from(limit) + 1)
             .map(|(_, release)| release.clone())
             .collect::<Vec<_>>();
@@ -129,6 +146,58 @@ impl MetadataIndex for InMemoryMetadataIndex {
         };
 
         Ok(ReleasePage::new(items, next_cursor))
+    }
+
+    async fn list_artists(
+        &self,
+        limit: u8,
+        cursor: Option<String>,
+    ) -> Result<ArtistPage, ListArtistsError> {
+        let state = self.state.read().unwrap();
+        let cursor = cursor
+            .map(|cursor| {
+                let bytes = URL_SAFE_NO_PAD
+                    .decode(cursor)
+                    .map_err(|_| ListArtistsError::InvalidCursor)?;
+                let value =
+                    String::from_utf8(bytes).map_err(|_| ListArtistsError::InvalidCursor)?;
+                let id = value
+                    .strip_prefix("tonhalle-artist-cursor-v0:")
+                    .ok_or(ListArtistsError::InvalidCursor)?
+                    .parse::<ArtistId>()
+                    .map_err(|_| ListArtistsError::InvalidCursor)?;
+                if !state.artists.contains_key(&id) {
+                    return Err(ListArtistsError::InvalidCursor);
+                }
+                Ok(id)
+            })
+            .transpose()?;
+        let start = cursor.as_ref().map_or(Unbounded, Excluded);
+        let mut items = state
+            .artists
+            .range::<ArtistId, _>((start, Unbounded))
+            .take(usize::from(limit) + 1)
+            .map(|(_, artist)| artist.clone())
+            .collect::<Vec<_>>();
+        let next_cursor = if items.len() > usize::from(limit) {
+            items.pop();
+            items.last().map(|artist| {
+                URL_SAFE_NO_PAD.encode(format!("tonhalle-artist-cursor-v0:{}", artist.artist_id()))
+            })
+        } else {
+            None
+        };
+        Ok(ArtistPage::new(items, next_cursor))
+    }
+
+    async fn get_artist(&self, id: &ArtistId) -> Result<ArtistCredit, GetArtistError> {
+        self.state
+            .read()
+            .unwrap()
+            .artists
+            .get(id)
+            .cloned()
+            .ok_or(GetArtistError::NotFound)
     }
 
     /// Looks up an accepted release in the startup snapshot.
@@ -187,7 +256,12 @@ mod tests {
             Err(GetTrackError::NotFound)
         ));
         assert_eq!(
-            index.list_releases(100, None).await.unwrap().items().len(),
+            index
+                .list_releases(100, None, None)
+                .await
+                .unwrap()
+                .items()
+                .len(),
             1
         );
         assert_eq!(
@@ -206,7 +280,12 @@ mod tests {
         );
         assert_ne!(first.is_ok(), second.is_ok());
         assert_eq!(
-            index.list_releases(100, None).await.unwrap().items().len(),
+            index
+                .list_releases(100, None, None)
+                .await
+                .unwrap()
+                .items()
+                .len(),
             1
         );
     }
@@ -230,16 +309,16 @@ mod tests {
     #[tokio::test]
     async fn list_releases_preserves_order_and_resumes_without_duplicates_when_limit_changes() {
         let index = index_with(releases()).await;
-        let all = index.list_releases(100, None).await.unwrap();
+        let all = index.list_releases(100, None, None).await.unwrap();
         assert!(
             all.items()
                 .windows(2)
                 .all(|pair| pair[0].id() < pair[1].id())
         );
-        let first = index.list_releases(1, None).await.unwrap();
+        let first = index.list_releases(1, None, None).await.unwrap();
         assert_eq!(first.items().len(), 1);
         let rest = index
-            .list_releases(100, first.next_cursor().map(str::to_owned))
+            .list_releases(100, first.next_cursor().map(str::to_owned), None)
             .await
             .unwrap();
         assert!(rest.next_cursor().is_none());
@@ -254,7 +333,7 @@ mod tests {
         let mut cursor = None;
         let mut ids = Vec::new();
         loop {
-            let page = index.list_releases(1, cursor).await.unwrap();
+            let page = index.list_releases(1, cursor, None).await.unwrap();
             ids.extend(page.items().iter().map(|r| r.id().clone()));
             cursor = page.next_cursor().map(str::to_owned);
             if cursor.is_none() {
@@ -283,7 +362,7 @@ mod tests {
             )),
         ] {
             assert!(matches!(
-                index.list_releases(1, Some(cursor)).await,
+                index.list_releases(1, Some(cursor), None).await,
                 Err(ListReleasesError::InvalidCursor)
             ));
         }
@@ -293,7 +372,7 @@ mod tests {
     async fn metadata_index_returns_empty_pages_and_not_found_for_absent_entities() {
         let release = releases().remove(0);
         let index = InMemoryMetadataIndex::new();
-        let page = index.list_releases(30, None).await.unwrap();
+        let page = index.list_releases(30, None, None).await.unwrap();
         assert!(page.items().is_empty());
         assert!(page.next_cursor().is_none());
         assert!(matches!(

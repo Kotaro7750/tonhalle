@@ -18,13 +18,17 @@ use tower::ServiceExt;
 use crate::{
     controller::MusicController,
     domain::{
-        id::{ReleaseId, TrackId},
+        artist_credit::ArtistCredit,
+        id::{ArtistId, ReleaseId, TrackId},
         ingestion::metadata::sample_metadata,
         primitive::{release::Release, track::Track},
     },
     port::metadata_index::{self, MetadataIndex, ReleasePage},
     test_support::sample_release,
-    usecase::{GetReleaseUseCase, GetTrackUseCase, ListReleasesUseCase},
+    usecase::{
+        GetArtistUseCase, GetReleaseUseCase, GetTrackUseCase, ListArtistsUseCase,
+        ListReleasesUseCase,
+    },
 };
 
 /// Wires HTTP routes to the index supplied by an integration test.
@@ -32,6 +36,8 @@ fn router(index: Arc<dyn MetadataIndex>) -> Router {
     Router::new().nest(
         "/api/v0",
         MusicController::new(
+            ListArtistsUseCase::new(index.clone()),
+            GetArtistUseCase::new(index.clone()),
             ListReleasesUseCase::new(index.clone()),
             GetReleaseUseCase::new(index.clone()),
             GetTrackUseCase::new(index),
@@ -60,6 +66,8 @@ async fn request(app: Router, uri: &str) -> (StatusCode, Value) {
     let body: Value =
         serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     let schema = match status {
+        StatusCode::OK if uri.split('?').next() == Some("/api/v0/artists") => "ArtistPage",
+        StatusCode::OK if uri.starts_with("/api/v0/artists/") => "Artist",
         StatusCode::OK if uri.split('?').next() == Some("/api/v0/releases") => "ReleasePage",
         StatusCode::OK if uri.starts_with("/api/v0/releases/") => "Release",
         StatusCode::OK => "Track",
@@ -86,6 +94,8 @@ static CONTRACT_VALIDATORS: LazyLock<BTreeMap<&'static str, jsonschema::Validato
             serde_yaml_ng::from_str(include_str!("../../../contracts/api/openapi.yaml")).unwrap();
 
         [
+            "Artist",
+            "ArtistPage",
             "ReleasePage",
             "Release",
             "Track",
@@ -124,6 +134,24 @@ impl FixtureIndex {
 
 #[async_trait]
 impl MetadataIndex for FixtureIndex {
+    async fn list_artists(
+        &self,
+        _: u8,
+        _: Option<String>,
+    ) -> Result<metadata_index::ArtistPage, metadata_index::ListArtistsError> {
+        Err(metadata_index::ListArtistsError::Internal(Box::new(
+            IoError::other("secret filesystem path"),
+        )))
+    }
+    async fn get_artist(
+        &self,
+        _: &ArtistId,
+    ) -> Result<ArtistCredit, metadata_index::GetArtistError> {
+        Err(metadata_index::GetArtistError::Internal(Box::new(
+            IoError::other("secret filesystem path"),
+        )))
+    }
+
     async fn add_release(&self, _: Release) -> Result<(), metadata_index::AddReleaseError> {
         panic!("read-only fixture")
     }
@@ -133,6 +161,7 @@ impl MetadataIndex for FixtureIndex {
         &self,
         limit: u8,
         cursor: Option<String>,
+        _: Option<ArtistId>,
     ) -> Result<ReleasePage, metadata_index::ListReleasesError> {
         match cursor.as_deref() {
             Some("invalid") => Err(metadata_index::ListReleasesError::InvalidCursor),
@@ -286,6 +315,24 @@ struct FailingIndex;
 
 #[async_trait]
 impl MetadataIndex for FailingIndex {
+    async fn list_artists(
+        &self,
+        _: u8,
+        _: Option<String>,
+    ) -> Result<metadata_index::ArtistPage, metadata_index::ListArtistsError> {
+        Err(metadata_index::ListArtistsError::Internal(Box::new(
+            IoError::other("secret filesystem path"),
+        )))
+    }
+    async fn get_artist(
+        &self,
+        _: &ArtistId,
+    ) -> Result<ArtistCredit, metadata_index::GetArtistError> {
+        Err(metadata_index::GetArtistError::Internal(Box::new(
+            IoError::other("secret filesystem path"),
+        )))
+    }
+
     async fn add_release(&self, _: Release) -> Result<(), metadata_index::AddReleaseError> {
         panic!("read-only fixture")
     }
@@ -295,6 +342,7 @@ impl MetadataIndex for FailingIndex {
         &self,
         _: u8,
         _: Option<String>,
+        _: Option<ArtistId>,
     ) -> Result<ReleasePage, metadata_index::ListReleasesError> {
         Err(metadata_index::ListReleasesError::Internal(Box::new(
             IoError::other("secret filesystem path"),
@@ -321,6 +369,8 @@ async fn music_api_hides_infrastructure_details_in_internal_errors() {
     let app = router(Arc::new(FailingIndex));
 
     for uri in [
+        "/api/v0/artists".into(),
+        format!("/api/v0/artists/artist-{}", "a".repeat(64)),
         "/api/v0/releases".into(),
         format!("/api/v0/releases/release-{}", "a".repeat(64)),
         format!("/api/v0/tracks/track-{}", "a".repeat(64)),
@@ -332,5 +382,117 @@ async fn music_api_hides_infrastructure_details_in_internal_errors() {
             body,
             json!({"type": "about:blank", "title": "Internal Server Error", "status": 500})
         );
+    }
+}
+
+#[tokio::test]
+async fn artist_routes_browse_release_credits_and_filter_releases_with_pagination() {
+    use crate::{
+        infrastructure::metadata_index::InMemoryMetadataIndex,
+        test_support::sample_release_with_audio_id,
+    };
+    let index = Arc::new(InMemoryMetadataIndex::new());
+    let mut releases = Vec::new();
+    for (position, names) in [vec!["One", "Two"], vec!["One"], vec!["Three"]]
+        .into_iter()
+        .enumerate()
+    {
+        let mut raw = sample_metadata();
+        *raw.release_title_mut() = format!("Release {position}");
+        *raw.release_credit_mut().names_mut() = names.into_iter().map(str::to_owned).collect();
+        raw.release_credit_mut().mbids_mut().clear();
+        *raw.track_credit_mut().names_mut() = vec!["Track only".into()];
+        raw.track_credit_mut().mbids_mut().clear();
+        let release = sample_release_with_audio_id(
+            &raw,
+            format!("2f1c75fc-55de-4d4b-8992-76050f65dff{position}")
+                .parse()
+                .unwrap(),
+        );
+        index.add_release(release.clone()).await.unwrap();
+        releases.push(release);
+    }
+    let app = router(index);
+    let (status, all) = request(app.clone(), "/api/v0/artists").await;
+    assert_eq!(status, StatusCode::OK);
+    let artists = all["items"].as_array().unwrap();
+    assert_eq!(artists.len(), 3);
+    assert!(
+        artists
+            .windows(2)
+            .all(|pair| pair[0]["id"].as_str() < pair[1]["id"].as_str())
+    );
+    assert!(artists.iter().all(|artist| artist["name"] != "Track only"));
+    let (_, first) = request(app.clone(), "/api/v0/artists?limit=1").await;
+    let cursor = first["nextCursor"].as_str().unwrap();
+    let (_, rest) = request(
+        app.clone(),
+        &format!("/api/v0/artists?limit=100&cursor={cursor}"),
+    )
+    .await;
+    assert_eq!(rest["items"], json!(artists[1..]));
+    assert!(rest.get("nextCursor").is_none());
+    for artist in artists {
+        let (status, detail) = request(
+            app.clone(),
+            &format!("/api/v0/artists/{}", artist["id"].as_str().unwrap()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(&detail, artist);
+    }
+    for credit in releases[0].artist_credits() {
+        let uri = format!("/api/v0/releases?artistId={}", credit.artist_id());
+        let (status, all) = request(app.clone(), &uri).await;
+        assert_eq!(status, StatusCode::OK);
+        let expected = releases
+            .iter()
+            .filter(|release| {
+                release
+                    .artist_credits()
+                    .iter()
+                    .any(|c| c.artist_id() == credit.artist_id())
+            })
+            .count();
+        assert_eq!(all["items"].as_array().unwrap().len(), expected);
+        let (_, first) = request(app.clone(), &format!("{uri}&limit=1")).await;
+        if let Some(cursor) = first["nextCursor"].as_str() {
+            let (_, rest) = request(app.clone(), &format!("{uri}&limit=100&cursor={cursor}")).await;
+            assert_eq!(rest["items"], json!(all["items"].as_array().unwrap()[1..]));
+        }
+    }
+    let track_artist = releases[0].tracks()[0].artist_credits()[0].artist_id();
+    for id in [
+        track_artist.to_string(),
+        format!("artist-{}", "0".repeat(64)),
+    ] {
+        let (status, _) = request(app.clone(), &format!("/api/v0/artists/{id}")).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, page) = request(app.clone(), &format!("/api/v0/releases?artistId={id}")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(page, json!({"items": []}));
+    }
+}
+
+#[tokio::test]
+async fn artist_routes_validate_queries_paths_and_empty_collections() {
+    use crate::infrastructure::metadata_index::InMemoryMetadataIndex;
+    let app = router(Arc::new(InMemoryMetadataIndex::new()));
+    let (status, page) = request(app.clone(), "/api/v0/artists").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page, json!({"items": []}));
+    for uri in [
+        "/api/v0/artists?limit=0",
+        "/api/v0/artists?limit=101",
+        "/api/v0/artists?limit=abc",
+        "/api/v0/artists?cursor=",
+        "/api/v0/artists?cursor=invalid",
+        "/api/v0/artists/invalid",
+        "/api/v0/artists/%FF",
+        "/api/v0/releases?artistId=",
+        "/api/v0/releases?artistId=invalid",
+    ] {
+        let (status, _) = request(app.clone(), uri).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
     }
 }

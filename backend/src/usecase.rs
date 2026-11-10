@@ -4,15 +4,101 @@ use std::{error, sync::Arc};
 
 use crate::{
     domain::{
-        id::{ReleaseId, TrackId},
+        artist_credit::ArtistCredit,
+        id::{ArtistId, ReleaseId, TrackId},
         primitive::{release::Release, track::Track},
     },
-    port::metadata_index::{self, MetadataIndex, ReleasePage},
+    port::metadata_index::{self, ArtistPage, MetadataIndex, ReleasePage},
 };
 
 pub(crate) mod build_metadata_index;
 pub(crate) mod content_access;
 pub(crate) mod import_music;
+
+/// Browses accepted artists through the metadata index.
+#[derive(Clone)]
+pub(crate) struct ListArtistsUseCase {
+    index: Arc<dyn MetadataIndex>,
+}
+
+/// An artist-list failure expressed independently of the HTTP controller.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ListArtistsError {
+    /// The supplied token cannot continue artist browsing.
+    #[error("invalid cursor")]
+    InvalidCursor,
+    /// The underlying index failure remains available for diagnostics.
+    #[error("listing artists: {0}")]
+    Internal(#[source] Box<dyn error::Error + Send + Sync>),
+}
+
+impl From<metadata_index::ListArtistsError> for ListArtistsError {
+    /// Converts port failures while preserving their cause and application meaning.
+    fn from(error: metadata_index::ListArtistsError) -> Self {
+        match error {
+            metadata_index::ListArtistsError::InvalidCursor => Self::InvalidCursor,
+            metadata_index::ListArtistsError::Internal(error) => Self::Internal(error),
+        }
+    }
+}
+
+impl ListArtistsUseCase {
+    /// Connects the query workflow to its metadata-index port.
+    pub(crate) fn new(index: Arc<dyn MetadataIndex>) -> Self {
+        Self { index }
+    }
+
+    /// Reads an ordered page using the supplied continuation token.
+    pub(crate) async fn execute(
+        &self,
+        limit: u8,
+        cursor: Option<String>,
+    ) -> Result<ArtistPage, ListArtistsError> {
+        self.index
+            .list_artists(limit, cursor)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+/// Retrieves an accepted artist through the metadata index.
+#[derive(Clone)]
+pub(crate) struct GetArtistUseCase {
+    index: Arc<dyn MetadataIndex>,
+}
+
+/// An artist lookup failure expressed independently of HTTP.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum GetArtistError {
+    /// The requested entity was not accepted into the index.
+    #[error("artist not found")]
+    NotFound,
+    /// The underlying index failure remains available for diagnostics.
+    #[error("getting artist: {0}")]
+    Internal(#[source] Box<dyn error::Error + Send + Sync>),
+}
+
+impl From<metadata_index::GetArtistError> for GetArtistError {
+    /// Converts port failures while preserving their cause and application meaning.
+    fn from(error: metadata_index::GetArtistError) -> Self {
+        match error {
+            metadata_index::GetArtistError::NotFound => Self::NotFound,
+            metadata_index::GetArtistError::Internal(error) => Self::Internal(error),
+        }
+    }
+}
+
+impl GetArtistUseCase {
+    /// Connects the query workflow to its metadata-index port.
+    pub(crate) fn new(index: Arc<dyn MetadataIndex>) -> Self {
+        Self { index }
+    }
+
+    /// Retrieves the requested release artist.
+    pub(crate) async fn execute(&self, id: &ArtistId) -> Result<ArtistCredit, GetArtistError> {
+        self.index.get_artist(id).await.map_err(Into::into)
+    }
+}
 
 /// Browses accepted releases through the metadata index.
 #[derive(Clone)]
@@ -52,9 +138,10 @@ impl ListReleasesUseCase {
         &self,
         limit: u8,
         cursor: Option<String>,
+        artist_id: Option<ArtistId>,
     ) -> Result<ReleasePage, ListReleasesError> {
         self.index
-            .list_releases(limit, cursor)
+            .list_releases(limit, cursor, artist_id)
             .await
             .map_err(Into::into)
     }

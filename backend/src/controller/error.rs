@@ -7,7 +7,9 @@ use axum::{
 };
 use tonhalle_api::models;
 
-use crate::usecase::{GetReleaseError, GetTrackError, ListReleasesError};
+use crate::usecase::{
+    GetArtistError, GetReleaseError, GetTrackError, ListArtistsError, ListReleasesError,
+};
 
 /// An HTTP boundary failure rendered as an RFC 9457 problem.
 #[derive(Debug, thiserror::Error)]
@@ -24,6 +26,32 @@ pub(crate) enum ControllerError {
     /// A logged application failure has no client-visible details.
     #[error("internal server error")]
     Internal,
+}
+
+impl From<ListArtistsError> for ControllerError {
+    /// Maps invalid cursors to bad requests and logs internal listing failures.
+    fn from(value: ListArtistsError) -> Self {
+        match value {
+            ListArtistsError::InvalidCursor => Self::BadRequest("invalid cursor".into()),
+            ListArtistsError::Internal(error) => {
+                tracing::error!(?error, "Listing artists failed");
+                Self::Internal
+            }
+        }
+    }
+}
+
+impl From<GetArtistError> for ControllerError {
+    /// Maps missing artists to not found and logs internal lookup failures.
+    fn from(value: GetArtistError) -> Self {
+        match value {
+            GetArtistError::NotFound => Self::NotFound,
+            GetArtistError::Internal(error) => {
+                tracing::error!(?error, "Getting artist failed");
+                Self::Internal
+            }
+        }
+    }
 }
 
 impl From<ListReleasesError> for ControllerError {

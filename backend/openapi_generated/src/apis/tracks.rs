@@ -18,7 +18,7 @@ pub enum GetTrackResponse {
     Status200(models::Track),
     /// 識別子の形式、カーソル、またはlimitが不正である
     Status400(models::BadRequestProblem),
-    /// 指定したリリースまたはトラックが存在しない
+    /// 指定したリソースが存在しない
     Status404(models::NotFoundProblem),
     /// サーバー内部で予期しないエラーが発生した
     Status500(models::InternalServerErrorProblem),

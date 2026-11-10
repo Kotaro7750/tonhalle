@@ -1,6 +1,7 @@
 .gitignore
 Cargo.toml
 README.md
+src/apis/artists.rs
 src/apis/content_access.rs
 src/apis/mod.rs
 src/apis/releases.rs
