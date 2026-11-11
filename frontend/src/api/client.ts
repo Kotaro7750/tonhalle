@@ -1,4 +1,4 @@
-import { Configuration, ContentAccessApi, ReleasesApi, TracksApi, ResponseError } from './generated'
+import { ArtistsApi, Configuration, ContentAccessApi, ReleasesApi, TracksApi, ResponseError } from './generated'
 import { authEnabled, getAccessToken } from '../auth/config'
 
 const configuration = new Configuration({
@@ -14,6 +14,7 @@ const configuration = new Configuration({
     },
   }] : [],
 })
+const artists = new ArtistsApi(configuration)
 const releases = new ReleasesApi(configuration)
 const tracks = new TracksApi(configuration)
 const contentAccess = new ContentAccessApi(configuration)
@@ -47,8 +48,12 @@ async function request<T>(operation: () => Promise<T>, fallback = 'Could not loa
 export const api = {
   configureContentAccess: () => request(() => contentAccess.configureContentAccess(), 'Could not configure content access.'),
   clearContentAccess: () => request(() => contentAccess.clearContentAccess(), 'Could not clear content access.'),
-  listReleases: (cursor: string | undefined, signal: AbortSignal) =>
-    request(() => releases.listReleases({ cursor, limit: 30 }, { signal })),
+  listArtists: (cursor: string | undefined, signal: AbortSignal) =>
+    request(() => artists.listArtists({ cursor, limit: 30 }, { signal })),
+  getArtist: (artistId: string, signal: AbortSignal) =>
+    request(() => artists.getArtist({ artistId }, { signal })),
+  listReleases: (cursor: string | undefined, signal: AbortSignal, artistId?: string) =>
+    request(() => releases.listReleases({ cursor, limit: 30, artistId }, { signal })),
   getRelease: (releaseId: string, signal: AbortSignal) =>
     request(() => releases.getRelease({ releaseId }, { signal })),
   getTrack: (trackId: string, signal: AbortSignal) =>

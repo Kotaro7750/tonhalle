@@ -1,7 +1,7 @@
 
 # NotFoundProblem
 
-指定したリリースまたはトラックが存在しない
+指定したリソースが存在しない
 
 ## Properties
 

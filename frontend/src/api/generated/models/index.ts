@@ -1,6 +1,8 @@
 /* tslint:disable */
 /* eslint-disable */
+export * from './Artist';
 export * from './ArtistCredit';
+export * from './ArtistPage';
 export * from './AudioFile';
 export * from './BadRequestProblem';
 export * from './ContentAccessConfiguration';

@@ -2,7 +2,8 @@ import { Box, Container, HStack, Link, SkipNavContent, SkipNavLink, Text } from 
 import { ArrowLeft } from './components/Icons'
 import { Route, Routes, Link as RouterLink, matchPath, useLocation, useNavigate, type Location } from 'react-router-dom'
 import { useEffect, useRef } from 'react'
-import { ReleasesPage } from './pages/ReleasesPage'
+import { LibraryPage } from './pages/LibraryPage'
+import { ArtistPage } from './pages/ArtistPage'
 import { ReleasePage } from './pages/ReleasePage'
 import { QueueOverlay } from './player/QueueOverlay'
 import { usePlayer } from './player/store'
@@ -42,7 +43,8 @@ export function App() {
       <Container as="main" ref={main} tabIndex={-1} outline="none" maxW="6xl" px={{ base: '5', md: '8' }} pt={{ base: '8', md: '12' }} pb={hasQueue ? { base: '64', md: '32' } : '12'} flex="1">
         <SkipNavContent />
         <Routes location={pageLocation}>
-          <Route path="/" element={<ReleasesPage />} />
+          <Route path="/" element={<LibraryPage />} />
+          <Route path="/artists/:artistId" element={<ArtistPage />} />
           <Route path="/releases/:releaseId" element={<ReleasePage />} />
           <Route path="*" element={<Box><Text mb="4">Page not found.</Text><Link asChild><RouterLink to="/" aria-label="Back to library" title="ライブラリに戻る"><ArrowLeft size={16} /></RouterLink></Link></Box>} />
         </Routes>

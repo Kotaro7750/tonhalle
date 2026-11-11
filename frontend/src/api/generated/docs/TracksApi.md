@@ -77,7 +77,7 @@ example().catch(console.error);
 | **401** | 認証有効時、Bearerアクセストークンが未指定または不正である |  * WWW-Authenticate -  <br>  |
 | **200** | トラック詳細の取得に成功した |  -  |
 | **400** | 識別子の形式、カーソル、またはlimitが不正である |  -  |
-| **404** | 指定したリリースまたはトラックが存在しない |  -  |
+| **404** | 指定したリソースが存在しない |  -  |
 | **500** | サーバー内部で予期しないエラーが発生した |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)

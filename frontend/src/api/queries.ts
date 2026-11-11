@@ -4,10 +4,10 @@ import { api, ApiError } from './client'
 export const retryRequest = (failureCount: number, error: Error) =>
   !(error instanceof ApiError && error.status < 500) && failureCount < 2
 
-export const releaseListOptions = infiniteQueryOptions({
-  queryKey: ['releases'],
+export const releasesByArtistOptions = (artistId?: string) => infiniteQueryOptions({
+  queryKey: artistId ? ['releases', { artistId }] : ['releases'],
   initialPageParam: undefined as string | undefined,
-  queryFn: ({ pageParam, signal }) => api.listReleases(pageParam, signal),
+  queryFn: ({ pageParam, signal }) => api.listReleases(pageParam, signal, artistId),
   getNextPageParam: (page) => page.nextCursor,
 })
 export const releaseOptions = (id: string) => queryOptions({
@@ -15,4 +15,15 @@ export const releaseOptions = (id: string) => queryOptions({
 })
 export const trackOptions = (id: string) => queryOptions({
   queryKey: ['track', id], queryFn: ({ signal }) => api.getTrack(id, signal),
+})
+
+export const releaseListOptions = releasesByArtistOptions()
+export const artistListOptions = infiniteQueryOptions({
+  queryKey: ['artists'],
+  initialPageParam: undefined as string | undefined,
+  queryFn: ({ pageParam, signal }) => api.listArtists(pageParam, signal),
+  getNextPageParam: (page) => page.nextCursor,
+})
+export const artistOptions = (id: string) => queryOptions({
+  queryKey: ['artist', id], queryFn: ({ signal }) => api.getArtist(id, signal),
 })

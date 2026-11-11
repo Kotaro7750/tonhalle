@@ -10,6 +10,7 @@ import { CollectionActions } from '../player/CollectionActions'
 import { QueueAddButton } from '../player/QueueAddButton'
 import { RecordArt } from '../components/RecordArt'
 import { useAudioControls } from '../player/PlayerProvider'
+import { ArtistCredits } from '../components/ArtistCredits'
 import { artistName, formatTime } from '../format'
 
 function TrackFormatBadge({ trackId }: { trackId: string }) {
@@ -46,7 +47,7 @@ export function ReleasePage() {
       <Grid templateColumns="auto minmax(0, 1fr)" templateAreas={{ base: '"title title" "art metadata"', md: '"art title" "art metadata"' }} columnGap={{ base: '5', md: '10' }} rowGap={{ base: '6', md: '3' }} alignItems="center">
         <Box gridArea="title" alignSelf={{ md: 'end' }} minW="0">
           <PageHeading title={release.title}>
-            <Text textStyle="lg" color="fg.muted">{artistName(release.artistCredits)}</Text>
+            <Text textStyle="lg" color="fg.muted"><ArtistCredits credits={release.artistCredits} /></Text>
           </PageHeading>
         </Box>
         <Box gridArea="art" width={{ base: '32', sm: '40', md: '64' }}><RecordArt /></Box>

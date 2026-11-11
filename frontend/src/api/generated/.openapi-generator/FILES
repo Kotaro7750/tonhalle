@@ -1,8 +1,12 @@
+apis/ArtistsApi.ts
 apis/ContentAccessApi.ts
 apis/ReleasesApi.ts
 apis/TracksApi.ts
 apis/index.ts
+docs/Artist.md
 docs/ArtistCredit.md
+docs/ArtistPage.md
+docs/ArtistsApi.md
 docs/AudioFile.md
 docs/BadRequestProblem.md
 docs/ContentAccessApi.md
@@ -18,7 +22,9 @@ docs/Track.md
 docs/TrackSummary.md
 docs/TracksApi.md
 index.ts
+models/Artist.ts
 models/ArtistCredit.ts
+models/ArtistPage.ts
 models/AudioFile.ts
 models/BadRequestProblem.ts
 models/ContentAccessConfiguration.ts

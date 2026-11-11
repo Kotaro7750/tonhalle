@@ -1,60 +1,18 @@
-import { Box, IconButton, Card, Heading, Link, SimpleGrid, Stack, Text } from '@chakra-ui/react'
+import { Stack } from '@chakra-ui/react'
 import { useInfiniteQuery } from '@tanstack/react-query'
-import { ArrowDown } from '../components/Icons'
-import { useEffect, useRef } from 'react'
-import { Link as RouterLink } from 'react-router-dom'
-import { releaseListOptions } from '../api/queries'
-import { EmptyLibrary, ErrorNotice, Loading } from '../components/Feedback'
+import { releasesByArtistOptions } from '../api/queries'
+import { PagedCollection } from '../components/PagedCollection'
 import { PageHeading } from '../components/PageHeading'
-import { RecordArt } from '../components/RecordArt'
-import { CollectionActions } from '../player/CollectionActions'
-import { artistName } from '../format'
+import { ReleaseGrid } from '../components/ReleaseGrid'
 
-export function ReleasesPage() {
-  const query = useInfiniteQuery(releaseListOptions)
-  const sentinel = useRef<HTMLDivElement>(null)
-  const { hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage } = query
-
-  useEffect(() => {
-    if (!sentinel.current || !hasNextPage || isFetchingNextPage || isFetchNextPageError) return
-    const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) void fetchNextPage()
-    }, { rootMargin: '240px' })
-    observer.observe(sentinel.current)
-    return () => observer.disconnect()
-  }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage])
-
-  const items = query.data?.pages.flatMap((page) => page.items) ?? []
-  const uniqueItems = [...new Map(items.map((item) => [item.id, item])).values()]
+export function ReleasesPage({ artistId }: { artistId?: string }) {
+  const query = useInfiniteQuery(releasesByArtistOptions(artistId))
   return (
     <Stack gap="10">
-      <PageHeading title="Releases" />
-      {query.isPending ? <Loading /> : query.isError && !query.data ? <ErrorNotice error={query.error} retry={() => void query.refetch()} /> : (
-        <>
-          {!uniqueItems.length ? <EmptyLibrary /> : <SimpleGrid columns={{ base: 2, md: 3, lg: 4 }} gap={{ base: '5', md: '8' }}>
-            {uniqueItems.map((release) => <Card.Root key={release.id} variant="outline" bg="bg.panel" overflow="hidden">
-              <Link asChild display="block" flex="1" color="fg" textDecoration="none" _hover={{ bg: 'bg.subtle' }}>
-                <RouterLink to={`/releases/${release.id}`}>
-                  <Card.Body gap="4" p={{ base: '3', md: '5' }}>
-                    <RecordArt />
-                    <Stack gap="1">
-                      <Heading as="h2" size="md" fontFamily="body" overflowWrap="anywhere">{release.title}</Heading>
-                      <Text textStyle="sm" color="fg.muted" overflowWrap="anywhere">{artistName(release.artistCredits)}</Text>
-                      {release.releaseDate !== null && <Text textStyle="xs" color="fg.muted">{release.releaseDate}</Text>}
-                    </Stack>
-                  </Card.Body>
-                </RouterLink>
-              </Link>
-              <Card.Footer justifyContent="flex-end" px={{ base: '3', md: '5' }} py="2"><CollectionActions releaseId={release.id} title={release.title} /></Card.Footer>
-            </Card.Root>)}
-          </SimpleGrid>}
-          <Box ref={sentinel}>
-            {isFetchNextPageError && <ErrorNotice error={query.error!} retry={() => void fetchNextPage()} />}
-            {hasNextPage && !isFetchNextPageError && <IconButton aria-label="Load more" title="さらに読み込む" width="full" variant="ghost" loading={isFetchingNextPage} onClick={() => void fetchNextPage()}><ArrowDown size={16} /></IconButton>}
-            {!hasNextPage && !!uniqueItems.length && <Text textAlign="center" textStyle="sm" color="fg.muted">All releases loaded</Text>}
-          </Box>
-        </>
-      )}
+      {!artistId && <PageHeading title="Releases" />}
+      <PagedCollection query={query} label="releases">
+        {(items) => <ReleaseGrid releases={items} />}
+      </PagedCollection>
     </Stack>
   )
 }

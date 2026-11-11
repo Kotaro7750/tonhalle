@@ -78,7 +78,7 @@ example().catch(console.error);
 | **401** | 認証有効時、Bearerアクセストークンが未指定または不正である |  * WWW-Authenticate -  <br>  |
 | **200** | リリース詳細の取得に成功した |  -  |
 | **400** | 識別子の形式、カーソル、またはlimitが不正である |  -  |
-| **404** | 指定したリリースまたはトラックが存在しない |  -  |
+| **404** | 指定したリソースが存在しない |  -  |
 | **500** | サーバー内部で予期しないエラーが発生した |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
@@ -86,11 +86,11 @@ example().catch(console.error);
 
 ## listReleases
 
-> ReleasePage listReleases(cursor, limit)
+> ReleasePage listReleases(cursor, limit, artistId)
 
 リリース一覧の取得
 
-リリース概要をidの昇順でページごとに取得する。 各ページはリクエスト時点の一覧を対象とし、一連の取得を通じたスナップショットは保証しない。
+リリース概要をidの昇順でページごとに取得する。 artistIdを指定した場合、Releaseのアーティストクレジットに指定したidを含むリリースのみを返す。 共同リリースは各アーティストの一覧に含め、Trackのクレジットのみの一致は対象としない。 artistIdを省略した場合は全リリースを対象とする。 条件に一致するリリースがない場合は、200で空のitemsを返す。 各ページはリクエスト時点の一覧を対象とし、一連の取得を通じたスナップショットは保証しない。
 
 ### Example
 
@@ -110,10 +110,12 @@ async function example() {
   const api = new ReleasesApi(config);
 
   const body = {
-    // string | 取得開始位置を指定するカーソル。 初回または先頭から取得し直す場合は省略する。 続きの取得では前のレスポンスのnextCursorをそのまま指定し、内容を解釈してはならない。  (optional)
+    // string | 取得開始位置を指定するカーソル。 初回または先頭から取得し直す場合は省略する。 続きの取得では前のレスポンスのnextCursorをそのまま指定し、内容を解釈してはならない。 カーソルは取得元の一覧APIと絞り込み条件に対応する。 継続リクエストでは同じAPIと絞り込み条件を使用すること。 異なるAPIや絞り込み条件のカーソルを指定した場合、期待した結果が得られない可能性がある。 絞り込み条件を変更する場合はカーソルを省略して先頭から取得し直す。  (optional)
     cursor: cursor_example,
     // number | 1ページの最大件数。 継続リクエストで変更してもよい  (optional)
     limit: 56,
+    // string | Releaseのアーティストクレジットによる絞り込みに使用するアーティストの識別子 (optional)
+    artistId: artistId_example,
   } satisfies ListReleasesRequest;
 
   try {
@@ -133,8 +135,9 @@ example().catch(console.error);
 
 | Name | Type | Description  | Notes |
 |------------- | ------------- | ------------- | -------------|
-| **cursor** | `string` | 取得開始位置を指定するカーソル。 初回または先頭から取得し直す場合は省略する。 続きの取得では前のレスポンスのnextCursorをそのまま指定し、内容を解釈してはならない。  | [Optional] [Defaults to `undefined`] |
+| **cursor** | `string` | 取得開始位置を指定するカーソル。 初回または先頭から取得し直す場合は省略する。 続きの取得では前のレスポンスのnextCursorをそのまま指定し、内容を解釈してはならない。 カーソルは取得元の一覧APIと絞り込み条件に対応する。 継続リクエストでは同じAPIと絞り込み条件を使用すること。 異なるAPIや絞り込み条件のカーソルを指定した場合、期待した結果が得られない可能性がある。 絞り込み条件を変更する場合はカーソルを省略して先頭から取得し直す。  | [Optional] [Defaults to `undefined`] |
 | **limit** | `number` | 1ページの最大件数。 継続リクエストで変更してもよい  | [Optional] [Defaults to `30`] |
+| **artistId** | `string` | Releaseのアーティストクレジットによる絞り込みに使用するアーティストの識別子 | [Optional] [Defaults to `undefined`] |
 
 ### Return type
 
