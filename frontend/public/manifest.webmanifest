@@ -1,0 +1,16 @@
+{
+  "id": "./",
+  "name": "Tonhalle",
+  "short_name": "Tonhalle",
+  "description": "Your music library",
+  "lang": "en",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "media-artwork.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

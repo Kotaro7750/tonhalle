@@ -57,12 +57,13 @@ test('shared controls seek, restart and repeat in both players', async ({ page }
   }
   expect(await surface.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(background)
   await expect(mini.getByRole('button', { name: 'Repeat mode' })).toHaveAttribute('aria-pressed', 'true')
+  // WebKit wraps a looped track at its endpoint even while paused. Test endpoint clamping with looping off.
+  await mini.getByRole('button', { name: 'Repeat mode' }).click()
   await mini.getByRole('button', { name: 'Forward 15 seconds' }).click()
   await expect.poll(() => audio.evaluate((el: HTMLAudioElement) => el.currentTime)).toBe(15)
   await mini.getByRole('button', { name: 'Restart track' }).click()
   await expect.poll(() => audio.evaluate((el: HTMLAudioElement) => el.currentTime)).toBe(0)
   expect(await audio.evaluate((el: HTMLAudioElement) => el.paused)).toBe(true)
-  await mini.getByRole('button', { name: 'Repeat mode' }).click()
   expect(await audio.evaluate((el: HTMLAudioElement) => el.loop)).toBe(false)
   await mini.getByRole('button', { name: 'Repeat mode' }).click()
   await mini.getByRole('button', { name: 'Repeat mode' }).click()
