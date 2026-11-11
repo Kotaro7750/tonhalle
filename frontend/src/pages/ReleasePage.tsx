@@ -8,7 +8,7 @@ import { ErrorNotice, Loading } from '../components/Feedback'
 import { PageHeading } from '../components/PageHeading'
 import { CollectionActions } from '../player/CollectionActions'
 import { QueueAddButton } from '../player/QueueAddButton'
-import { RecordArt } from '../components/RecordArt'
+import { DetailHeader } from '../components/DetailHeader'
 import { useAudioControls } from '../player/PlayerProvider'
 import { ArtistCredits } from '../components/ArtistCredits'
 import { artistName, formatTime } from '../format'
@@ -44,18 +44,14 @@ export function ReleasePage() {
   return (
     <Stack gap="10">
       <Link asChild color="fg.muted"><RouterLink to="/" aria-label="Releases" title="リリース一覧に戻る"><ArrowLeft size={16} /></RouterLink></Link>
-      <Grid templateColumns="auto minmax(0, 1fr)" templateAreas={{ base: '"title title" "art metadata"', md: '"art title" "art metadata"' }} columnGap={{ base: '5', md: '10' }} rowGap={{ base: '6', md: '3' }} alignItems="center">
-        <Box gridArea="title" alignSelf={{ md: 'end' }} minW="0">
+      <DetailHeader metadata={<>
+        <Stack direction={{ base: 'column', md: 'row' }} align="start" color="fg.muted" gap={{ base: '2', md: '3' }}>{release.releaseDate !== null && <Badge>{release.releaseDate}</Badge>}<Text textStyle="sm">{release.tracks.length} {release.tracks.length === 1 ? 'track' : 'tracks'}{totalDurationMs !== null && ` · ${formatTime(totalDurationMs / 1000)}`}</Text></Stack>
+        <CollectionActions releaseId={release.id} title={release.title} />
+      </>}>
           <PageHeading title={release.title}>
             <Text textStyle="lg" color="fg.muted"><ArtistCredits credits={release.artistCredits} /></Text>
           </PageHeading>
-        </Box>
-        <Box gridArea="art" width={{ base: '32', sm: '40', md: '64' }}><RecordArt /></Box>
-        <Stack gridArea="metadata" gap="3" minW="0" alignSelf={{ md: 'start' }}>
-          <Stack direction={{ base: 'column', md: 'row' }} align="start" color="fg.muted" gap={{ base: '2', md: '3' }}>{release.releaseDate !== null && <Badge>{release.releaseDate}</Badge>}<Text textStyle="sm">{release.tracks.length} {release.tracks.length === 1 ? 'track' : 'tracks'}{totalDurationMs !== null && ` · ${formatTime(totalDurationMs / 1000)}`}</Text></Stack>
-          <CollectionActions releaseId={release.id} title={release.title} />
-        </Stack>
-      </Grid>
+      </DetailHeader>
       <Stack gap="6">
         <Heading as="h2" size="xl">Tracks</Heading>
         {discs.map((disc) => <Stack as="section" aria-label={`Disc ${disc}`} key={disc} gap="0">
